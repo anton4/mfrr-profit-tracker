@@ -143,9 +143,6 @@ button { font: inherit; }
 .down-text { color: var(--down); }
 .up-text { color: var(--up); }
 
-.split-row { display: flex; flex-wrap: wrap; gap: 16px; align-items: stretch; }
-.direction { flex: 999 1 940px; min-width: 0; }
-.tools { flex: 1 1 340px; min-width: 0; gap: 16px; }
 
 /* ---------- by direction ---------- */
 .dir-grid {
@@ -344,7 +341,7 @@ button { font: inherit; }
 .dir-grid, .act-inner { padding-bottom: 4px; }
 
 /* ---------- activations: own scroll area with a pinned label row ---------- */
-.act-table { max-height: min(78vh, 920px); overflow: auto; overscroll-behavior: contain; }
+.act-table { max-height: max(420px, calc(100vh - 160px)); overflow: auto; overscroll-behavior: contain; }
 .act-head { position: sticky; top: 0; z-index: 5; box-shadow: 0 1px 0 var(--line); }
 
 /* a figure shown for comparison but not counted (fees while the Fees switch is off) */
@@ -366,3 +363,22 @@ button { font: inherit; }
 .price-row { display: grid; grid-template-columns: 64px auto 1fr; align-items: center; gap: 10px; }
 .price-value { font-size: 24px; font-weight: 500; letter-spacing: -0.02em; }
 .price-row .pill { justify-self: start; }
+
+/* ---------- data tools drawer ---------- */
+.toolsbtn {
+  display: inline-flex; align-items: center; gap: 8px; height: 44px; padding: 0 14px; cursor: pointer;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font-weight: 500;
+}
+.toolsbtn:hover { background: var(--surface-2); }
+.toolsbtn.busy { border-color: var(--accent); }
+.drawer-backdrop { position: fixed; inset: 0; z-index: 40; background: rgba(10, 14, 20, 0.35); animation: fade-in 0.15s ease; }
+.drawer {
+  position: fixed; top: 0; right: 0; bottom: 0; z-index: 41; width: min(460px, 100vw);
+  display: flex; flex-direction: column; background: var(--surface); border-left: 1px solid var(--line);
+  box-shadow: -12px 0 32px rgba(16, 24, 40, 0.18); animation: slide-in 0.18s ease;
+}
+.drawer-head { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--line); }
+.drawer-body { flex: 1; overflow-y: auto; padding: 18px 20px 28px; display: flex; flex-direction: column; gap: 16px; }
+@keyframes slide-in { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@media (max-width: 720px) { .toolsbtn span:not(.num) { display: none; } .toolsbtn { padding: 0 12px; } }

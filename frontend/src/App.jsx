@@ -79,6 +79,13 @@ function App() {
   const [feeConfig, setFeeConfig] = useState(null);   // { values, defaults, labels, unit }
   const [feeDraft, setFeeDraft] = useState({});
   const [feesOpen, setFeesOpen] = useState(false);
+  const [toolsOpen, setToolsOpen] = useState(false);
+  useEffect(() => {
+    if (!toolsOpen) return undefined;
+    const onKey = (e) => { if (e.key === 'Escape') setToolsOpen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [toolsOpen]);
   const [feeStatus, setFeeStatus] = useState(null);
   // Period: from ?range=… (shareable links), else today
   const [filter, setFilterState] = useState(() => {
@@ -584,6 +591,11 @@ function App() {
                 </button>
               ))}
             </div>
+            <button type="button" className={`toolsbtn ${backfillRunning ? 'busy' : ''}`} aria-haspopup="dialog" onClick={() => setToolsOpen(true)}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0" /><circle cx="16" cy="6" r="2" /><circle cx="10" cy="12" r="2" /><circle cx="18" cy="18" r="2" /></svg>
+              <span>Data tools</span>
+              {backfillRunning && <span className="num small">{backfill.progress}%</span>}
+            </button>
             <button type="button" className={`switch ${feesOn ? 'on' : ''}`} role="switch" aria-checked={feesOn}
               title="Include seller and network fees in the bill effect and net result" onClick={() => setFeesOn(!feesOn)}>
               <span className="switch-track" aria-hidden="true"><span className="switch-thumb" /></span>
@@ -717,7 +729,6 @@ function App() {
           </div>
         </div>
 
-        <div className="split-row">
           <section className="card section direction">
             <div className="section-head">
               <h2>By direction</h2>
@@ -774,122 +785,6 @@ function App() {
             </div>
           </section>
 
-          <section className="card section tools">
-            <h2>Data tools</h2>
-            <div className="tool">
-              <div className="tool-title">Backfill from Home Assistant</div>
-              <div className="tool-form">
-                <label className="field">
-                  From
-                  <input type="datetime-local" value={backfillRange.from} disabled={backfillRunning}
-                    onChange={(e) => setBackfillRange({ ...backfillRange, from: e.target.value })} />
-                </label>
-                <label className="field">
-                  To
-                  <input type="datetime-local" value={backfillRange.to} max={toLocalInput(currentSlotStart())} disabled={backfillRunning}
-                    onChange={(e) => setBackfillRange({ ...backfillRange, to: e.target.value })} />
-                </label>
-                <button type="button" className="btn" onClick={startBackfill} disabled={backfillRunning || !backfillRange.from || !backfillRange.to}>
-                  {backfillRunning ? 'Backfilling…' : 'Backfill'}
-                </button>
-              </div>
-              {backfillRunning && (
-                <div className="progress">
-                  <div className="progress-bar"><div style={{ width: `${backfill.progress}%` }} /></div>
-                  <span className="muted small">{backfill.phase} · {backfill.progress}%</span>
-                </div>
-              )}
-              {backfill?.state === 'done' && (
-                <div className="ok small">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg>
-                  {backfill.message} · {fmtSlot(backfill.from).split('–')[0]} → {fmtSlot(backfill.to).split('–')[0]}
-                </div>
-              )}
-              {backfill?.state === 'error' && <div className="err small">{backfill.message}</div>}
-              {backfillError && <div className="err small">{backfillError}</div>}
-              <div className="muted small">
-                Replays Home Assistant history through the tracker; rows in the range are recomputed. History is kept for <code>purge_keep_days</code> (10 days by default).
-              </div>
-            </div>
-            <div className="divider" />
-            <div className="tool">
-              <button type="button" className="disclosure" aria-expanded={feesOpen} onClick={() => setFeesOpen(!feesOpen)}>
-                <span className="tool-title">Electricity fees</span>
-                <span className="muted small">
-                  {feeConfig ? `${feeConfig.packages[feeConfig.values.network_package]?.label ?? ''} · ` : ''}{feesOn ? 'included in net' : 'not included'}
-                </span>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ transform: feesOpen ? 'rotate(180deg)' : undefined }}><path d="m6 9 6 6 6-6" /></svg>
-              </button>
-              {feesOpen && feeConfig && (
-                <>
-                  {(() => {
-                    const pkgId = feeDraft.network_package ?? feeConfig.values.network_package;
-                    const pkg = feeConfig.packages[pkgId];
-                    const isCustom = !pkg?.rates;
-                    const hasPeaks = isCustom || Number(feeDraft.elektrilevi_day_peak) > 0;
-                    const networkKeys = feeConfig.network_keys.filter((k) => hasPeaks || !k.endsWith('_peak'));
-                    const otherKeys = Object.keys(feeConfig.labels).filter((k) => !feeConfig.network_keys.includes(k));
-                    const field = (k, disabled = false) => (
-                      <label key={k} className="field">
-                        <span>{feeConfig.labels[k]} <span className="unit">{k === 'vat' ? '%' : feeConfig.unit}</span></span>
-                        <input type="text" inputMode="decimal" value={feeDraft[k] ?? ''} placeholder={String(feeConfig.defaults[k])}
-                          disabled={disabled} onChange={(e) => setFeeDraft({ ...feeDraft, [k]: e.target.value })} />
-                      </label>
-                    );
-                    return (
-                      <>
-                        <div className="field">
-                          <span>Network package</span>
-                          <div className="seg seg-sm" role="group" aria-label="Network package">
-                            {Object.entries(feeConfig.packages).map(([id, p]) => (
-                              <button key={id} type="button" className={pkgId === id ? 'on' : ''} aria-pressed={pkgId === id} onClick={() => pickPackage(id)}>
-                                {id === 'custom' ? 'Custom' : p.label.replace('Elektrilevi ', '')}
-                              </button>
-                            ))}
-                          </div>
-                          <span className="small">{pkg?.label}{pkg?.note ? ` · ${pkg.note}` : ''}{!isCustom ? ' · price list from 1 June 2026' : ''}</span>
-                        </div>
-                        <div className="fee-grid">{networkKeys.map((k) => field(k, !isCustom))}</div>
-                        {hasPeaks && (
-                          <div className="muted small">
-                            Peak rates apply November–March: day peak on working days 09–12 and 16–20, weekend peak on weekends and holidays 16–20.
-                            {isCustom && ' Leave them at 0 if your package has no peak hours.'}
-                          </div>
-                        )}
-                        <div className="divider" />
-                        <div className="fee-grid">{otherKeys.map((k) => field(k))}</div>
-                      </>
-                    );
-                  })()}
-                  <div className="tool-form">
-                    <button type="button" className="btn" onClick={() => saveFees(feeDraft)}>Save fees</button>
-                    <button type="button" className="btn-link" onClick={() => saveFees(feeConfig.defaults)}>Reset to defaults</button>
-                  </div>
-                  {feeStatus && <div className={`small ${feeStatus.ok ? 'ok' : 'err'}`}>{feeStatus.text}</div>}
-                  <div className="muted small">
-                    Cents/kWh excl. VAT. Import = (spot + fees) × (1 + VAT); export = spot − export fees. Night/weekend network rate
-                    before 07:00, from 22:00, on weekends and Estonian public holidays. Monthly network fees are fixed costs and not included.
-                    Turn on <strong>Fees</strong> in the header to use them.
-                  </div>
-                </>
-              )}
-            </div>
-            <div className="divider" />
-            <div className="tool">
-              <div className="tool-title">Qilowatt report</div>
-              <label className="btn-ghost">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 16V4M6 10l6-6 6 6M4 20h16" /></svg>
-                Import revenue or signals CSV
-                <input className="visually-hidden" type="file" accept=".csv,text/csv" multiple
-                  onChange={(e) => { importQwReports([...e.target.files]); e.target.value = ''; }} />
-              </label>
-              {qwImport && qwImport.map((line) => (
-                <div key={line} className={`small ${line.startsWith('✓') ? 'ok' : 'err'}`}>{line}</div>
-              ))}
-              <div className="muted small">Official per-slot energy and revenue are shown next to the tracker&apos;s own figures.</div>
-            </div>
-          </section>
-        </div>
 
         <section className="card activations">
           <div className="section-head padded">
@@ -1030,6 +925,133 @@ function App() {
           )}
         </section>
       </div>
+      {toolsOpen && (
+        <>
+          <div className="drawer-backdrop" onClick={() => setToolsOpen(false)} />
+          <aside className="drawer" role="dialog" aria-modal="true" aria-labelledby="tools-title">
+            <div className="drawer-head">
+              <h2 id="tools-title">Data tools</h2>
+              <button type="button" className="iconbtn" aria-label="Close data tools" onClick={() => setToolsOpen(false)}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
+              </button>
+            </div>
+            <div className="drawer-body">
+        <div className="tool">
+          <div className="tool-title">Backfill from Home Assistant</div>
+          <div className="tool-form">
+            <label className="field">
+              From
+              <input type="datetime-local" value={backfillRange.from} disabled={backfillRunning}
+                onChange={(e) => setBackfillRange({ ...backfillRange, from: e.target.value })} />
+            </label>
+            <label className="field">
+              To
+              <input type="datetime-local" value={backfillRange.to} max={toLocalInput(currentSlotStart())} disabled={backfillRunning}
+                onChange={(e) => setBackfillRange({ ...backfillRange, to: e.target.value })} />
+            </label>
+            <button type="button" className="btn" onClick={startBackfill} disabled={backfillRunning || !backfillRange.from || !backfillRange.to}>
+              {backfillRunning ? 'Backfilling…' : 'Backfill'}
+            </button>
+          </div>
+          {backfillRunning && (
+            <div className="progress">
+              <div className="progress-bar"><div style={{ width: `${backfill.progress}%` }} /></div>
+              <span className="muted small">{backfill.phase} · {backfill.progress}%</span>
+            </div>
+          )}
+          {backfill?.state === 'done' && (
+            <div className="ok small">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg>
+              {backfill.message} · {fmtSlot(backfill.from).split('–')[0]} → {fmtSlot(backfill.to).split('–')[0]}
+            </div>
+          )}
+          {backfill?.state === 'error' && <div className="err small">{backfill.message}</div>}
+          {backfillError && <div className="err small">{backfillError}</div>}
+          <div className="muted small">
+            Replays Home Assistant history through the tracker; rows in the range are recomputed. History is kept for <code>purge_keep_days</code> (10 days by default).
+          </div>
+        </div>
+        <div className="divider" />
+        <div className="tool">
+          <button type="button" className="disclosure" aria-expanded={feesOpen} onClick={() => setFeesOpen(!feesOpen)}>
+            <span className="tool-title">Electricity fees</span>
+            <span className="muted small">
+              {feeConfig ? `${feeConfig.packages[feeConfig.values.network_package]?.label ?? ''} · ` : ''}{feesOn ? 'included in net' : 'not included'}
+            </span>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ transform: feesOpen ? 'rotate(180deg)' : undefined }}><path d="m6 9 6 6 6-6" /></svg>
+          </button>
+          {feesOpen && feeConfig && (
+            <>
+              {(() => {
+                const pkgId = feeDraft.network_package ?? feeConfig.values.network_package;
+                const pkg = feeConfig.packages[pkgId];
+                const isCustom = !pkg?.rates;
+                const hasPeaks = isCustom || Number(feeDraft.elektrilevi_day_peak) > 0;
+                const networkKeys = feeConfig.network_keys.filter((k) => hasPeaks || !k.endsWith('_peak'));
+                const otherKeys = Object.keys(feeConfig.labels).filter((k) => !feeConfig.network_keys.includes(k));
+                const field = (k, disabled = false) => (
+                  <label key={k} className="field">
+                    <span>{feeConfig.labels[k]} <span className="unit">{k === 'vat' ? '%' : feeConfig.unit}</span></span>
+                    <input type="text" inputMode="decimal" value={feeDraft[k] ?? ''} placeholder={String(feeConfig.defaults[k])}
+                      disabled={disabled} onChange={(e) => setFeeDraft({ ...feeDraft, [k]: e.target.value })} />
+                  </label>
+                );
+                return (
+                  <>
+                    <div className="field">
+                      <span>Network package</span>
+                      <div className="seg seg-sm" role="group" aria-label="Network package">
+                        {Object.entries(feeConfig.packages).map(([id, p]) => (
+                          <button key={id} type="button" className={pkgId === id ? 'on' : ''} aria-pressed={pkgId === id} onClick={() => pickPackage(id)}>
+                            {id === 'custom' ? 'Custom' : p.label.replace('Elektrilevi ', '')}
+                          </button>
+                        ))}
+                      </div>
+                      <span className="small">{pkg?.label}{pkg?.note ? ` · ${pkg.note}` : ''}{!isCustom ? ' · price list from 1 June 2026' : ''}</span>
+                    </div>
+                    <div className="fee-grid">{networkKeys.map((k) => field(k, !isCustom))}</div>
+                    {hasPeaks && (
+                      <div className="muted small">
+                        Peak rates apply November–March: day peak on working days 09–12 and 16–20, weekend peak on weekends and holidays 16–20.
+                        {isCustom && ' Leave them at 0 if your package has no peak hours.'}
+                      </div>
+                    )}
+                    <div className="divider" />
+                    <div className="fee-grid">{otherKeys.map((k) => field(k))}</div>
+                  </>
+                );
+              })()}
+              <div className="tool-form">
+                <button type="button" className="btn" onClick={() => saveFees(feeDraft)}>Save fees</button>
+                <button type="button" className="btn-link" onClick={() => saveFees(feeConfig.defaults)}>Reset to defaults</button>
+              </div>
+              {feeStatus && <div className={`small ${feeStatus.ok ? 'ok' : 'err'}`}>{feeStatus.text}</div>}
+              <div className="muted small">
+                Cents/kWh excl. VAT. Import = (spot + fees) × (1 + VAT); export = spot − export fees. Night/weekend network rate
+                before 07:00, from 22:00, on weekends and Estonian public holidays. Monthly network fees are fixed costs and not included.
+                Turn on <strong>Fees</strong> in the header to use them.
+              </div>
+            </>
+          )}
+        </div>
+        <div className="divider" />
+        <div className="tool">
+          <div className="tool-title">Qilowatt report</div>
+          <label className="btn-ghost">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 16V4M6 10l6-6 6 6M4 20h16" /></svg>
+            Import revenue or signals CSV
+            <input className="visually-hidden" type="file" accept=".csv,text/csv" multiple
+              onChange={(e) => { importQwReports([...e.target.files]); e.target.value = ''; }} />
+          </label>
+          {qwImport && qwImport.map((line) => (
+            <div key={line} className={`small ${line.startsWith('✓') ? 'ok' : 'err'}`}>{line}</div>
+          ))}
+          <div className="muted small">Official per-slot energy and revenue are shown next to the tracker&apos;s own figures.</div>
+        </div>
+            </div>
+          </aside>
+        </>
+      )}
     </div>
   );
 }
