@@ -100,7 +100,7 @@ def tick():
         accum_s = 0.0
         saw_mffr = False
 
-    reading = meter.read(now)
+    reading = meter.read(now, slot_start=slot)
 
     sig = get_signal()
     if sig and not saw_mffr:
