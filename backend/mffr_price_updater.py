@@ -13,7 +13,7 @@ scheduler = BackgroundScheduler()
 
 # Baltic Transparency Dashboard (Elering / AST / Litgrid) — mFRR balancing energy prices, €/MWh, 15 min
 BTD_URL = "https://api-baltic.transparency-dashboard.eu/api/v1/export"
-PRICE_AREA = os.getenv("MFFR_PRICE_AREA", "Estonia")
+PRICE_AREA = os.getenv("MFRR_PRICE_AREA", "Estonia")
 MAX_LOOKBACK = timedelta(days=7)
 
 # Ensure log folder exists
@@ -80,7 +80,7 @@ def fetch_and_update_mffr_prices():
         window_start = datetime.fromisoformat(pending[0]["timeslot"])
         api_data = fetch_btd_prices(window_start, now)
     except Exception as e:
-        msg = f"❌ Failed to fetch MFFR prices: {e}"
+        msg = f"❌ Failed to fetch mFRR prices: {e}"
         print(msg)
         log_error(msg)
         return
@@ -97,14 +97,14 @@ def fetch_and_update_mffr_prices():
                     alter=True
                 )
                 updated += 1
-                print(f"📡 Set MFFR {row['signal']} price {mfrr_price} for slot {row['timeslot']}")
+                print(f"📡 Set mFRR {row['signal']} price {mfrr_price} for slot {row['timeslot']}")
         except Exception as e:
-            msg = f"⚠️ Failed to update MFFR price for slot {row['timeslot']}: {e}"
+            msg = f"⚠️ Failed to update mFRR price for slot {row['timeslot']}: {e}"
             print(msg)
             log_error(msg)
 
     if updated:
-        print(f"✅ Updated {updated} MFFR prices in SQLite DB.")
+        print(f"✅ Updated {updated} mFRR prices in SQLite DB.")
     print(f"⏱️ Completed in {time.time() - start_time:.2f} seconds.")
 
 scheduler.add_job(

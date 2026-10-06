@@ -1,7 +1,7 @@
 services:
-  mffr-tracker:
+  mfrr-tracker:
     build: .
-    container_name: mffr-tracker
+    container_name: mfrr-tracker
     ports:
       - "8099:8000"
     volumes:
