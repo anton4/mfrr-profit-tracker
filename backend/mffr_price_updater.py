@@ -74,10 +74,31 @@ def fetch_btd_prices(start: datetime, end: datetime) -> dict:
         prices[slot_start] = {direction: values[i] for direction, i in columns.items()}
     return prices
 
+def apply_mffr_prices(db, rows, api_data: dict) -> int:
+    """Set each row's mFRR price for its direction (UP → upward, DOWN → downward); returns count."""
+    updated = 0
+    for row in rows:
+        try:
+            slot_start = datetime.fromisoformat(row["timeslot"]).astimezone(pytz.utc)
+            mfrr_price = (api_data.get(slot_start) or {}).get(row["signal"])
+
+            if mfrr_price is not None:
+                db["slots"].update(
+                    row["id"],
+                    {"mffr_price": mfrr_price},
+                    alter=True
+                )
+                updated += 1
+                print(f"📡 Set mFRR {row['signal']} price {mfrr_price} for slot {row['timeslot']}")
+        except Exception as e:
+            msg = f"⚠️ Failed to update mFRR price for slot {row['timeslot']}: {e}"
+            print(msg)
+            log_error(msg)
+    return updated
+
 def fetch_and_update_mffr_prices():
     start_time = time.time()
     db = sqlite_utils.Database(DB_PATH)
-    updated = 0
 
     now = datetime.now(tz)
     pending = []
@@ -112,23 +133,7 @@ def fetch_and_update_mffr_prices():
         sync_status["latest_up_price"] = api_data[latest]["UP"]
         sync_status["latest_down_price"] = api_data[latest]["DOWN"]
 
-    for row in pending:
-        try:
-            slot_start = datetime.fromisoformat(row["timeslot"]).astimezone(pytz.utc)
-            mfrr_price = (api_data.get(slot_start) or {}).get(row["signal"])
-
-            if mfrr_price is not None:
-                db["slots"].update(
-                    row["id"],
-                    {"mffr_price": mfrr_price},
-                    alter=True
-                )
-                updated += 1
-                print(f"📡 Set mFRR {row['signal']} price {mfrr_price} for slot {row['timeslot']}")
-        except Exception as e:
-            msg = f"⚠️ Failed to update mFRR price for slot {row['timeslot']}: {e}"
-            print(msg)
-            log_error(msg)
+    updated = apply_mffr_prices(db, pending, api_data)
 
     sync_status["pending_slots"] = len(pending) - updated
     if updated:

@@ -35,15 +35,18 @@ def get_entity(entity_id: str) -> dict | None:
         return None
 
 
-def get_state(entity_id: str) -> str | None:
-    entity = get_entity(entity_id)
+# Every reader takes an optional `fetch` (entity_id → HA state dict). Live reads use get_entity;
+# a backfill passes a reader over recorded HA history, so the same logic replays the past.
+
+def get_state(entity_id: str, fetch=None) -> str | None:
+    entity = (fetch or get_entity)(entity_id)
     state = entity.get("state") if entity else None
     return None if state in ("unknown", "unavailable", None) else state
 
 
-def _get_scaled(entity_id: str, units: dict, default_unit: str) -> float | None:
+def _get_scaled(entity_id: str, units: dict, default_unit: str, fetch=None) -> float | None:
     """Numeric state converted via the entity's unit_of_measurement."""
-    entity = get_entity(entity_id)
+    entity = (fetch or get_entity)(entity_id)
     if not entity or entity.get("state") in ("unknown", "unavailable", None):
         return None
     unit = (entity.get("attributes", {}).get("unit_of_measurement") or default_unit).strip().lower()
@@ -53,15 +56,15 @@ def _get_scaled(entity_id: str, units: dict, default_unit: str) -> float | None:
         return None
 
 
-def get_requested_w() -> float | None:
+def get_requested_w(fetch=None) -> float | None:
     """Power Kratt requested for the current command (W, unsigned)."""
     if not SENSOR_POWERLIMIT:
         return None
-    value = _get_scaled(SENSOR_POWERLIMIT, _POWER_UNITS, "W")
+    value = _get_scaled(SENSOR_POWERLIMIT, _POWER_UNITS, "W", fetch)
     return abs(value) if value is not None else None
 
 
-def get_grid_power_w() -> float | None:
+def get_grid_power_w(fetch=None) -> float | None:
     """Net grid power summed over all phases (W, +import / -export).
 
     Summing signed phase powers nets the phases like a phase-summing utility meter,
@@ -69,7 +72,7 @@ def get_grid_power_w() -> float | None:
     """
     total = 0.0
     for entity_id in SENSOR_GRID_POWER:
-        value = _get_scaled(entity_id, _POWER_UNITS, "W")
+        value = _get_scaled(entity_id, _POWER_UNITS, "W", fetch)
         if value is None:
             return None   # a partial sum would misstate the grid flow
         total += value
@@ -93,14 +96,14 @@ class GridMeter:
         tolerance = max(self.BRIDGE_TOLERANCE_W, max(abs(a), abs(b)) * self.BRIDGE_TOLERANCE_PCT / 100.0)
         return abs(a - b) <= tolerance
 
-    def read(self, now, slot_start=None):
+    def read(self, now, slot_start=None, fetch=None):
         """(net_kwh, seconds) since the previous successful read; net is +import / −export.
 
         A bridged long gap is clipped to slot_start so a long outage doesn't pile earlier
         slots' energy into the current one. Returns None on the first read, a failed read,
         or a long gap across which the power changed.
         """
-        power_w = get_grid_power_w()
+        power_w = get_grid_power_w(fetch)
         if power_w is None:
             return None   # keep the last good reading for bridging
         prev, self._prev = self._prev, (power_w, now)
@@ -118,12 +121,12 @@ class GridMeter:
         return (prev[0] + power_w) / 2.0 * seconds / 3_600_000.0, seconds
 
 
-def get_signal() -> str | None:
+def get_signal(fetch=None) -> str | None:
     """'UP' / 'DOWN' while Kratt is in control, otherwise None."""
-    source = get_state(SENSOR_SOURCE)
+    source = get_state(SENSOR_SOURCE, fetch)
     if not source or source.strip().lower() != PROVIDER:
         return None
-    mode = (get_state(SENSOR_MODE) or "").strip().lower()
+    mode = (get_state(SENSOR_MODE, fetch) or "").strip().lower()
     if mode in DOWN_MODES:
         return "DOWN"
     if mode in UP_MODES:

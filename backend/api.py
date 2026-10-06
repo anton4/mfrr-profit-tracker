@@ -4,7 +4,7 @@ from typing import Optional
 from datetime import datetime
 
 import pytz
-from fastapi import FastAPI, Query
+from fastapi import Body, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlite_utils import Database
@@ -12,6 +12,7 @@ from sqlite_utils import Database
 import main
 import profit_calc
 import mffr_price_updater
+import backfill
 
 app = FastAPI()
 DB_FILE = "data/mffr.db"
@@ -93,6 +94,25 @@ def get_price_sync():
         **mffr_price_updater.sync_status,
         "next_sync_at": next_run.astimezone(LOCAL_TZ).isoformat() if next_run else None,
     }
+
+@app.get("/api/backfill")
+def get_backfill_status():
+    return backfill.status
+
+@app.post("/api/backfill", status_code=202)
+def start_backfill(payload: dict = Body(...)):
+    """Rebuild slot rows in [from, to) from Home Assistant history (runs in the background)."""
+    try:
+        start = backfill.parse_local(payload["from"])
+        end = backfill.parse_local(payload["to"])
+    except (KeyError, ValueError, AttributeError):
+        raise HTTPException(400, "Body must be {\"from\": ISO date/time, \"to\": ISO date/time}")
+    if start >= end:
+        raise HTTPException(400, "'to' must be after 'from'")
+    try:
+        return backfill.start_job(start, end)
+    except RuntimeError as e:
+        raise HTTPException(409, str(e))
 
 @app.on_event("startup")
 def start_all_schedulers():
