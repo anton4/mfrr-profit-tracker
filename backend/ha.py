@@ -6,18 +6,20 @@ HA_URL = os.getenv("HA_URL", "http://localhost:8123")
 HA_TOKEN = os.getenv("HA_TOKEN")
 
 # Entities (from .env)
-SENSOR_SOURCE = os.environ["SENSOR_SOURCE"]           # sensor.qw_source (== "kratt" during an mFRR command)
-SENSOR_MODE = os.environ["SENSOR_MODE"]               # QW mode sensor: BUY → DOWN, SELL/FRRUP → UP
+SENSOR_SOURCE = os.environ["SENSOR_SOURCE"]           # sensor.qw_source (== "Kratt" during an mFRR command)
+SENSOR_MODE = os.environ["SENSOR_MODE"]               # sensor.qw_mode: frrdown → DOWN, frrup → UP
+SENSOR_POWERLIMIT = os.getenv("SENSOR_POWERLIMIT")    # sensor.qw_powerlimit: requested power (optional)
 # Cumulative grid energy counters, comma-separated (e.g. one per Shelly 3EM phase)
 SENSOR_GRID_IMPORT = [e.strip() for e in os.environ["SENSOR_GRID_IMPORT"].split(",") if e.strip()]
 SENSOR_GRID_EXPORT = [e.strip() for e in os.environ["SENSOR_GRID_EXPORT"].split(",") if e.strip()]
 SENSOR_NORDPOOL = os.environ["SENSOR_NORDPOOL"]       # nordpool price (€/kWh)
 
 PROVIDER = "kratt"
-DOWN_MODES = {"buy"}
-UP_MODES = {"sell", "frrup"}
+DOWN_MODES = {"frrdown"}
+UP_MODES = {"frrup"}
 
 _ENERGY_UNITS = {"wh": 0.001, "kwh": 1.0, "mwh": 1000.0}
+_POWER_UNITS = {"w": 1.0, "kw": 1000.0, "mw": 1_000_000.0}
 
 _HEADERS = {"Authorization": f"Bearer {HA_TOKEN}", "Content-Type": "application/json"}
 
@@ -41,16 +43,28 @@ def get_state(entity_id: str) -> str | None:
     return None if state in ("unknown", "unavailable", None) else state
 
 
-def get_energy_kwh(entity_id: str) -> float | None:
-    """Energy counter value converted to kWh (honours the entity's unit_of_measurement)."""
+def _get_scaled(entity_id: str, units: dict, default_unit: str) -> float | None:
+    """Numeric state converted via the entity's unit_of_measurement."""
     entity = get_entity(entity_id)
     if not entity or entity.get("state") in ("unknown", "unavailable", None):
         return None
-    unit = (entity.get("attributes", {}).get("unit_of_measurement") or "kWh").strip().lower()
+    unit = (entity.get("attributes", {}).get("unit_of_measurement") or default_unit).strip().lower()
     try:
-        return float(entity["state"]) * _ENERGY_UNITS.get(unit, 1.0)
+        return float(entity["state"]) * units.get(unit, 1.0)
     except ValueError:
         return None
+
+
+def get_energy_kwh(entity_id: str) -> float | None:
+    return _get_scaled(entity_id, _ENERGY_UNITS, "kWh")
+
+
+def get_requested_w() -> float | None:
+    """Power Kratt requested for the current command (W, unsigned)."""
+    if not SENSOR_POWERLIMIT:
+        return None
+    value = _get_scaled(SENSOR_POWERLIMIT, _POWER_UNITS, "W")
+    return abs(value) if value is not None else None
 
 
 def _sum_counters(entity_ids: list[str]) -> float | None:

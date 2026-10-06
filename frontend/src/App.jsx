@@ -290,7 +290,7 @@ function App() {
             <th>Split</th>
             <th>Count</th>
             <th>Duration</th>
-            <th>Battery (kWh)</th>
+            <th>mFRR (kWh)</th>
             <th>Grid (kWh)</th>
             <th>mFRR</th>
             <th>NPS</th>
@@ -306,7 +306,7 @@ function App() {
             <td data-label="Signal Split">{signalSplit.down}</td>
             <td data-label="Count">{summary.down.count}</td>
             <td data-label="Duration">{formatDuration(summary.down.duration)}</td>
-            <td data-label="Battery">{formatVal(summary.down.energy)} kWh</td>
+            <td data-label="mFRR (kWh)">{formatVal(summary.down.energy)} kWh</td>
             <td data-label="Grid">{formatVal(summary.down.grid_energy)} kWh</td>
             <td data-label="mFRR" style={{ color: summary.down.profit >= 0 ? 'green' : 'red' }}>{formatVal(summary.down.profit, 2)} €</td>
             <td data-label="NPS" style={{ color: summary.down.grid * -1 >= 0 ? 'green' : 'red' }}>{formatVal(summary.down.grid * -1, 2)} €</td>
@@ -322,7 +322,7 @@ function App() {
             <td data-label="Signal Split">{signalSplit.up}</td>
             <td data-label="Count">{summary.up.count}</td>
             <td data-label="Duration">{formatDuration(summary.up.duration)}</td>
-            <td data-label="Battery">{formatVal(summary.up.energy)} kWh</td>
+            <td data-label="mFRR (kWh)">{formatVal(summary.up.energy)} kWh</td>
             <td data-label="Grid">{formatVal(summary.up.grid_energy)} kWh</td>
             <td data-label="mFRR" style={{ color: summary.up.profit >= 0 ? 'green' : 'red' }}>{formatVal(summary.up.profit, 2)} €</td>
             <td data-label="NPS" style={{ color: summary.up.grid * -1 >= 0 ? 'green' : 'red' }}>{formatVal(summary.up.grid * -1, 2)} €</td>
@@ -338,7 +338,7 @@ function App() {
             <td></td>
             <td data-label="Count">{summary.total.count}</td>
             <td data-label="Duration">{formatDuration(summary.total.duration)}</td>
-            <td data-label="Battery">{formatVal(summary.total.energy)} kWh</td>
+            <td data-label="mFRR (kWh)">{formatVal(summary.total.energy)} kWh</td>
             <td data-label="Grid">{formatVal(summary.total.grid_energy)} kWh</td>
             <td data-label="mFRR" style={{ color: summary.total.profit >= 0 ? 'green' : 'red' }}>{formatVal(summary.total.profit, 2)} €</td>
             <td data-label="NPS" style={{ color: summary.total.grid * -1 >= 0 ? 'green' : 'red' }}>{formatVal(summary.total.grid * -1, 2)} €</td>
@@ -358,7 +358,9 @@ function App() {
             <th>Time</th>
             <th>Signal</th>
             <th>Duration</th>
-            <th>Battery (kWh)</th>
+            <th>mFRR (kWh)</th>
+            <th>Requested (kWh)</th>
+            <th>Delivery</th>
             <th>Grid (kWh)</th>
             <th>NPS €</th>
             <th>mFRR €</th>
@@ -382,7 +384,9 @@ function App() {
                 {entry.signal}
               </td>
               <td data-label="Duration">{entry.duration ?? '-'}</td>
-              <td data-label="Battery (kWh)">{entry.energy_kwh?.toFixed(2)}</td>
+              <td data-label="mFRR (kWh)">{entry.energy_kwh?.toFixed(2)}</td>
+              <td data-label="Requested (kWh)">{typeof entry.requested_kwh === 'number' ? entry.requested_kwh.toFixed(2) : '-'}</td>
+              <td data-label="Delivery">{typeof entry.delivery_pct === 'number' ? `${Math.round(entry.delivery_pct)}%` : '-'}</td>
               <td data-label="Grid (kWh)">{entry.grid_kwh?.toFixed(2)}</td>
               <td data-label="NPS (€)" style={{ color: entry.grid_cost * -1 >= 0 ? 'green' : 'red' }}>{safeFixed(entry.grid_cost * -1, 2)}</td>
               <td data-label="mFRR (€)" style={{ color: entry.profit >= 0 ? 'green' : 'red' }}>

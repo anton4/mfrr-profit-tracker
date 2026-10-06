@@ -6,7 +6,7 @@ import pytz
 from sqlite_utils import Database
 from sqlite_utils.db import NotFoundError
 
-from ha import SENSOR_NORDPOOL, GridMeter, get_entity, get_signal, mffr_energy_kwh
+from ha import SENSOR_NORDPOOL, GridMeter, get_entity, get_requested_w, get_signal, mffr_energy_kwh
 
 DB_PATH = "data/mffr.db"
 tz = pytz.timezone("Europe/Tallinn")
@@ -51,6 +51,8 @@ required_columns = {
     "grid_import_kwh": float,  # import part, netted across phases per read
     "grid_export_kwh": float,  # export part, netted across phases per read
     "metered_s": float,        # seconds covered by meter reads (for baseline energy)
+    "requested_kwh": float,    # energy Kratt asked for (qw_powerlimit × metered time)
+    "delivery_pct": float,     # delivered mFRR energy / requested energy
     "baseline_w": float        # snapshot of baseline per slot
 }
 for column, col_type in required_columns.items():
@@ -138,18 +140,23 @@ def write_current_timeslot():
 
     # Grid energy since the previous tick, from the cumulative meter counters
     net_kwh, seconds = reading if reading else (0.0, 0.0)
+    requested_w = get_requested_w()
 
     def totals(prev: dict | None) -> dict:
         """Add this tick to the slot totals; mFRR energy is evaluated over the whole slot."""
         prev = prev or {}
         grid_kwh = (prev.get("grid_kwh") or 0.0) + net_kwh
         metered_s = (prev.get("metered_s") or 0.0) + seconds
+        energy_kwh = mffr_energy_kwh(signal, grid_kwh, metered_s, baseline_w)
+        requested_kwh = (prev.get("requested_kwh") or 0.0) + (requested_w or 0.0) / 1000.0 * seconds / 3600.0
         return {
             "grid_kwh": round(grid_kwh, 5),
             "grid_import_kwh": round((prev.get("grid_import_kwh") or 0.0) + max(0.0, net_kwh), 5),
             "grid_export_kwh": round((prev.get("grid_export_kwh") or 0.0) + max(0.0, -net_kwh), 5),
             "metered_s": round(metered_s, 1),
-            "energy_kwh": round(mffr_energy_kwh(signal, grid_kwh, metered_s, baseline_w), 5),
+            "energy_kwh": round(energy_kwh, 5),
+            "requested_kwh": round(requested_kwh, 5),
+            "delivery_pct": round(energy_kwh / requested_kwh * 100.0, 1) if requested_kwh > 0 else None,
         }
 
     if row and row["signal"] == signal:
