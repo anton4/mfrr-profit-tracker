@@ -1,8 +1,7 @@
 services:
-  mffr-profit:
-    build:
-      context: ./backend
-    container_name: mffr-profit
+  mffr-tracker:
+    build: .
+    container_name: mffr-tracker
     ports:
       - "8099:8000"
     volumes:
@@ -11,25 +10,9 @@ services:
       - TZ=${TZ}
       - HA_URL=${HA_URL}
       - HA_TOKEN=${HA_TOKEN}
+      - SENSOR_SOURCE=${SENSOR_SOURCE}
       - SENSOR_MODE=${SENSOR_MODE}
-      - SENSOR_POWER=${SENSOR_POWER}
       - SENSOR_GRID=${SENSOR_GRID}
       - SENSOR_NORDPOOL=${SENSOR_NORDPOOL}
+      - KRATT_SHARE=${KRATT_SHARE:-0.20}
     restart: unless-stopped
-
-  mffr-ui:
-    build:
-      context: ./frontend
-    container_name: mffr-ui
-    ports:
-      - "5173:5173"
-    working_dir: /app
-    command: npm run dev -- --host
-    volumes:
-      - ./frontend:/app
-      - mffr_ui_node_modules:/app/node_modules
-    depends_on:
-      - mffr-profit
-
-volumes:
-  mffr_ui_node_modules:

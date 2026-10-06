@@ -1,19 +1,14 @@
 # backend/baseline.py
-import os
+# Tracks average grid power (Kratt meters at the grid connection point) during idle slots.
 from datetime import datetime
 import pytz
-import requests
 from apscheduler.schedulers.background import BackgroundScheduler
 from sqlite_utils import Database
 
+from ha import SENSOR_GRID, get_float, get_signal
+
 DB_PATH = "data/mffr.db"
 tz = pytz.timezone("Europe/Tallinn")
-
-HA_URL   = os.getenv("HA_URL", "http://localhost:8123")
-HA_TOKEN = os.getenv("HA_TOKEN")
-
-SENSOR_MODE  = os.environ["SENSOR_MODE"]
-SENSOR_POWER = os.environ["SENSOR_POWER"]
 
 def dlog(msg: str):
     print(f"[baseline] {datetime.now(tz).isoformat()}  {msg}")
@@ -63,32 +58,8 @@ accum_Wh = 0.0
 saw_mffr = False
 current_slot = None
 
-def _mode_to_signal(mode: str | None):
-    if not mode:
-        return None
-    m = mode.strip().lower()
-    if m in {"fusebox buy", "kratt buy"}:
-        return "DOWN"
-    if m in {"fusebox sell", "kratt sell"}:
-        return "UP"
-    return None
-
 def _slot_anchor(dt: datetime):
     return dt.replace(minute=(dt.minute // 15) * 15, second=0, microsecond=0)
-
-def _ha_state(entity_id: str):
-    try:
-        r = requests.get(
-            f"{HA_URL}/api/states/{entity_id}",
-            headers={"Authorization": f"Bearer {HA_TOKEN}", "Content-Type": "application/json"},
-            timeout=5
-        )
-        if not r.ok:
-            return None
-        s = r.json().get("state")
-        return None if s in ("unknown", "unavailable", None) else s
-    except Exception:
-        return None
 
 def tick():
     global _prev_t, _prev_p, accum_Wh, saw_mffr, current_slot
@@ -127,15 +98,9 @@ def tick():
         accum_Wh = 0.0
         saw_mffr = False
 
-    p = _ha_state(SENSOR_POWER)
-    if p is not None:
-        try:
-            p = float(p)
-        except ValueError:
-            p = None
+    p = get_float(SENSOR_GRID)
 
-    mode = _ha_state(SENSOR_MODE)
-    sig = _mode_to_signal(mode)
+    sig = get_signal()
     if sig and not saw_mffr:
         saw_mffr = True
 

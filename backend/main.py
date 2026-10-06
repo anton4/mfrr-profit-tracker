@@ -2,22 +2,14 @@
 import os
 from datetime import datetime, timedelta
 from apscheduler.schedulers.background import BackgroundScheduler
-import requests
 import pytz
 from sqlite_utils import Database
 from sqlite_utils.db import NotFoundError
 
+from ha import SENSOR_GRID, SENSOR_NORDPOOL, get_entity, get_float, get_signal, mffr_power_w
+
 DB_PATH = "data/mffr.db"
 tz = pytz.timezone("Europe/Tallinn")
-
-HA_URL = os.getenv("HA_URL", "http://localhost:8123")
-HA_TOKEN = os.getenv("HA_TOKEN")
-
-# Entities (from .env)
-SENSOR_MODE = os.environ["SENSOR_MODE"]               # input_select.battery_mode_selector
-SENSOR_GRID = os.environ["SENSOR_GRID"]               # sensor.ss_grid_power (W, +import / -export)
-SENSOR_NORDPOOL = os.environ["SENSOR_NORDPOOL"]       # nordpool price (€/kWh)
-SENSOR_POWER = os.environ["SENSOR_POWER"]             # sensor.ss_battery_power (W)
 
 # --- DB schema bootstrap ---
 init_db = Database(DB_PATH)
@@ -44,10 +36,15 @@ init_db["slots"].create({
     "slot_end": str
 }, pk="timeslot", if_not_exists=True)
 
+# Migrate legacy Fusebox column name
+if "fusebox_fee" in init_db["slots"].columns_dict and "kratt_fee" not in init_db["slots"].columns_dict:
+    print("🛠️  Renaming column 'fusebox_fee' → 'kratt_fee'")
+    init_db.conn.execute("ALTER TABLE slots RENAME COLUMN fusebox_fee TO kratt_fee")
+
 required_columns = {
     "grid_cost": float,
     "ffr_income": float,
-    "fusebox_fee": float,
+    "kratt_fee": float,
     "net_total": float,
     "price_per_kwh": float,
     "grid_kwh": float,     # legacy safety
@@ -68,20 +65,6 @@ def _with_busy_timeout(db: Database, ms: int = 5000):
         db.conn.execute(f"PRAGMA busy_timeout={ms};")
     except Exception:
         pass
-
-def get_sensor_state(entity_id: str):
-    url = f"{HA_URL}/api/states/{entity_id}"
-    headers = {"Authorization": f"Bearer {HA_TOKEN}", "Content-Type": "application/json"}
-    try:
-        resp = requests.get(url, headers=headers, timeout=5)
-        if not resp.ok:
-            print(f"❌ Failed to fetch {entity_id}: {resp.status_code}")
-            return None
-        state = resp.json().get("state")
-        return None if state in ("unknown", "unavailable", None) else state
-    except Exception as e:
-        print(f"❌ Error fetching {entity_id}: {e}")
-        return None
 
 def get_latest_baseline_w() -> float:
     try:
@@ -118,18 +101,7 @@ def write_current_timeslot():
     key = timeslot.isoformat()
     slot_end_time = timeslot + timedelta(minutes=15)
 
-    def mode_to_signal(mode: str | None) -> str | None:
-        if not mode:
-            return None
-        m = mode.strip().lower()
-        if m in {"fusebox buy", "kratt buy"}:
-            return "DOWN"
-        if m in {"fusebox sell", "kratt sell"}:
-            return "UP"
-        return None
-
-    battery_mode = get_sensor_state(SENSOR_MODE)
-    signal = mode_to_signal(battery_mode)
+    signal = get_signal()
 
     if signal != last_logged_signal:
         print(f"🔔 Signal became {signal} at {now.isoformat()}")
@@ -138,32 +110,36 @@ def write_current_timeslot():
     if not signal:
         return
 
-    # Calculate mffr_power_w = abs(battery_power - baseline)
-    try:
-        battery_power_w = float(get_sensor_state(SENSOR_POWER))
-        baseline_w = get_latest_baseline_w()
-        if baseline_w is not None:
-            mffr_power_w = abs(battery_power_w - baseline_w)
-        else:
-            mffr_power_w = 0.0
-    except Exception:
-        mffr_power_w = 0.0
-
-    energy_kwh = round((mffr_power_w / 1000.0) * (10.0 / 3600.0), 5)
-
-    grid_power_w = 0.0
-    gs = get_sensor_state(SENSOR_GRID)
-    if gs is not None:
-        try:
-            grid_power_w = float(gs)
-        except ValueError:
-            pass
-    grid_kwh = round((grid_power_w / 1000.0) * (10.0 / 3600.0), 5)
-
     try:
         row = db["slots"].get(key)
     except NotFoundError:
         row = None
+
+    # Baseline is locked per command run: reuse the snapshot stored on this slot,
+    # else carry it over from the directly preceding slot of the same run,
+    # else take the latest idle-slot baseline.
+    baseline_w = row.get("baseline_w") if row and row["signal"] == signal else None
+    if baseline_w is None:
+        try:
+            previous = db["slots"].get((timeslot - timedelta(minutes=15)).isoformat())
+            if previous.get("baseline_w") is not None and \
+                    (timeslot - datetime.fromisoformat(previous["end"])).total_seconds() <= 30:
+                baseline_w = previous["baseline_w"]
+        except NotFoundError:
+            pass
+    if baseline_w is None:
+        baseline_w = get_latest_baseline_w()
+
+    # Kratt meters at the grid connection point
+    grid_power_w = get_float(SENSOR_GRID)
+    if grid_power_w is None:
+        grid_power_w = 0.0
+        power_w = 0.0
+    else:
+        power_w = mffr_power_w(signal, grid_power_w, baseline_w)
+
+    energy_kwh = round((power_w / 1000.0) * (10.0 / 3600.0), 5)
+    grid_kwh = round((grid_power_w / 1000.0) * (10.0 / 3600.0), 5)
 
     if row and row["signal"] == signal:
         end_time = datetime.fromisoformat(row["end"])
@@ -183,7 +159,7 @@ def write_current_timeslot():
                 "was_backup": was_backup,
                 "slot_end": slot_end_time.isoformat(),
             }
-            if baseline_w is not None and (row.get("baseline_w") is None):
+            if row.get("baseline_w") is None:
                 update_data["baseline_w"] = baseline_w
 
             db["slots"].update(key, update_data)
@@ -219,12 +195,7 @@ def write_current_timeslot():
         db["slots"].insert(entry, pk="timeslot", replace=True)
 
     try:
-        resp = requests.get(
-            f"{HA_URL}/api/states/{SENSOR_NORDPOOL}",
-            headers={"Authorization": f"Bearer {HA_TOKEN}", "Content-Type": "application/json"},
-            timeout=5,
-        )
-        attrs = resp.json().get("attributes", {}) if resp.ok else {}
+        attrs = (get_entity(SENSOR_NORDPOOL) or {}).get("attributes", {})
         raw_today = attrs.get("raw_today", []) or []
         raw_tomorrow = attrs.get("raw_tomorrow", []) or []
         for p in (raw_today + raw_tomorrow):
