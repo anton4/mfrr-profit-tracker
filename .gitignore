@@ -2,3 +2,5 @@
 backend/data/frontend/dist/
 frontend/node_modules/
 backend/logs/
+__pycache__/
+*.pyc
