@@ -393,9 +393,9 @@ function App() {
 
   const summary = useMemo(() => {
     const acc = {
-      up:  { energy: 0, grid_energy: 0, profit: 0, duration: 0, count: 0, backup: 0, cancelled: 0, grid: 0, kratt: 0, ffr: 0, net: 0, priceSum: 0, priceCount: 0, billSpot: 0, fees: 0, requested: 0 },
-      down:{ energy: 0, grid_energy: 0, profit: 0, duration: 0, count: 0, backup: 0, cancelled: 0, grid: 0, kratt: 0, ffr: 0, net: 0, priceSum: 0, priceCount: 0, billSpot: 0, fees: 0, requested: 0 },
-      total:{ energy: 0, grid_energy: 0, profit: 0, duration: 0, count: 0, backup: 0, cancelled: 0, grid: 0, kratt: 0, ffr: 0, net: 0, priceSum: 0, priceCount: 0, billSpot: 0, fees: 0, requested: 0 },
+      up:  { energy: 0, grid_energy: 0, profit: 0, duration: 0, count: 0, backup: 0, cancelled: 0, grid: 0, kratt: 0, ffr: 0, net: 0, priceSum: 0, priceCount: 0, billSpot: 0, fees: 0, requested: 0, netOff: 0, netOn: 0 },
+      down:{ energy: 0, grid_energy: 0, profit: 0, duration: 0, count: 0, backup: 0, cancelled: 0, grid: 0, kratt: 0, ffr: 0, net: 0, priceSum: 0, priceCount: 0, billSpot: 0, fees: 0, requested: 0, netOff: 0, netOn: 0 },
+      total:{ energy: 0, grid_energy: 0, profit: 0, duration: 0, count: 0, backup: 0, cancelled: 0, grid: 0, kratt: 0, ffr: 0, net: 0, priceSum: 0, priceCount: 0, billSpot: 0, fees: 0, requested: 0, netOff: 0, netOn: 0 },
     };
 
     for (const entry of data) {
@@ -428,6 +428,8 @@ function App() {
       acc.total.backup += isBackup ? 1 : 0;
       acc.total.cancelled += isCancelled ? 1 : 0;
       acc.total.grid += gridCost;
+      acc.total.netOff += entry.net_total || 0;        // spot + VAT
+      acc.total.netOn += entry.net_total_fees || 0;    // with network & seller fees
       acc.total.billSpot += billSpot;
       acc.total.fees += feesEur;
       acc.total.requested += requested;
@@ -643,6 +645,11 @@ function App() {
           <div className="card kpi">
             <div className="muted small">Net result {feesOn ? '· incl. network & seller fees' : '· spot + VAT'}</div>
             <div className={`kpi-value num ${signClass(summary.total.net)}`}>{fmtEur(summary.total.net)}</div>
+            <div className="small kpi-compare">
+              {feesOn ? 'Without fees' : 'With fees'}{' '}
+              <span className={`num ${signClass(feesOn ? summary.total.netOff : summary.total.netOn)}`}>{fmtEur(feesOn ? summary.total.netOff : summary.total.netOn)}</span>
+              <span className="muted"> · fees {fmtEur(summary.total.netOn - summary.total.netOff)}</span>
+            </div>
             <div className="muted small">
               Activation <span className="num">{fmtEur(summary.total.profit)}</span> · Energy <span className="num">{fmtEur(summary.total.billSpot)}</span>
               {' · '}Fees <span className={`num ${feesOn ? '' : 'excluded'}`}>{fmtEur(summary.total.fees)}</span>{!feesOn && ' (not included)'}
