@@ -9,16 +9,14 @@ HA_TOKEN = os.getenv("HA_TOKEN")
 SENSOR_SOURCE = os.environ["SENSOR_SOURCE"]           # sensor.qw_source (== "Kratt" during an mFRR command)
 SENSOR_MODE = os.environ["SENSOR_MODE"]               # sensor.qw_mode: frrdown → DOWN, frrup → UP
 SENSOR_POWERLIMIT = os.getenv("SENSOR_POWERLIMIT")    # sensor.qw_powerlimit: requested power (optional)
-# Cumulative grid energy counters, comma-separated (e.g. one per Shelly 3EM phase)
-SENSOR_GRID_IMPORT = [e.strip() for e in os.environ["SENSOR_GRID_IMPORT"].split(",") if e.strip()]
-SENSOR_GRID_EXPORT = [e.strip() for e in os.environ["SENSOR_GRID_EXPORT"].split(",") if e.strip()]
+# Grid power per phase (W, +import / -export), comma-separated (e.g. Shelly 3EM channel a/b/c power)
+SENSOR_GRID_POWER = [e.strip() for e in os.environ["SENSOR_GRID_POWER"].split(",") if e.strip()]
 SENSOR_NORDPOOL = os.environ["SENSOR_NORDPOOL"]       # nordpool price (€/kWh)
 
 PROVIDER = "kratt"
 DOWN_MODES = {"frrdown"}
 UP_MODES = {"frrup"}
 
-_ENERGY_UNITS = {"wh": 0.001, "kwh": 1.0, "mwh": 1000.0}
 _POWER_UNITS = {"w": 1.0, "kw": 1000.0, "mw": 1_000_000.0}
 
 _HEADERS = {"Authorization": f"Bearer {HA_TOKEN}", "Content-Type": "application/json"}
@@ -55,10 +53,6 @@ def _get_scaled(entity_id: str, units: dict, default_unit: str) -> float | None:
         return None
 
 
-def get_energy_kwh(entity_id: str) -> float | None:
-    return _get_scaled(entity_id, _ENERGY_UNITS, "kWh")
-
-
 def get_requested_w() -> float | None:
     """Power Kratt requested for the current command (W, unsigned)."""
     if not SENSOR_POWERLIMIT:
@@ -67,41 +61,43 @@ def get_requested_w() -> float | None:
     return abs(value) if value is not None else None
 
 
-def _sum_counters(entity_ids: list[str]) -> float | None:
+def get_grid_power_w() -> float | None:
+    """Net grid power summed over all phases (W, +import / -export).
+
+    Summing signed phase powers nets the phases like a phase-summing utility meter,
+    so one phase importing while another exports does not count as both.
+    """
     total = 0.0
-    for entity_id in entity_ids:
-        value = get_energy_kwh(entity_id)
+    for entity_id in SENSOR_GRID_POWER:
+        value = _get_scaled(entity_id, _POWER_UNITS, "W")
         if value is None:
-            return None   # a partial sum would look like a huge drop/jump
+            return None   # a partial sum would misstate the grid flow
         total += value
     return total
 
 
 class GridMeter:
-    """Net grid energy from cumulative import/export counters.
+    """Net grid energy by integrating the summed phase power between reads (trapezoidal)."""
 
-    Phases are netted per read (Σ import − Σ export), like a phase-summing utility meter,
-    so one phase importing while another exports does not count as both.
-    """
+    # Don't bridge longer gaps (HA unreachable, sensors unavailable) by interpolation
+    MAX_GAP_S = 60
 
     def __init__(self):
-        self._prev = None   # (import_kwh, export_kwh, datetime)
+        self._prev = None   # (power_w, datetime)
 
     def read(self, now):
         """(net_kwh, seconds) since the previous successful read; net is +import / −export.
-        Returns None on the first read, a failed read or a counter reset."""
-        imp = _sum_counters(SENSOR_GRID_IMPORT)
-        exp = _sum_counters(SENSOR_GRID_EXPORT)
-        if imp is None or exp is None:
+        Returns None on the first read, a failed read or after a long gap."""
+        power_w = get_grid_power_w()
+        if power_w is None:
             return None
-        prev, self._prev = self._prev, (imp, exp, now)
+        prev, self._prev = self._prev, (power_w, now)
         if prev is None:
             return None
-        d_imp, d_exp = imp - prev[0], exp - prev[1]
-        seconds = (now - prev[2]).total_seconds()
-        if d_imp < 0 or d_exp < 0 or seconds <= 0:
-            return None   # counter reset (e.g. Shelly reboot)
-        return d_imp - d_exp, seconds
+        seconds = (now - prev[1]).total_seconds()
+        if seconds <= 0 or seconds > self.MAX_GAP_S:
+            return None
+        return (prev[0] + power_w) / 2.0 * seconds / 3_600_000.0, seconds
 
 
 def get_signal() -> str | None:

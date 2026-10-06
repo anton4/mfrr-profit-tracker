@@ -34,8 +34,7 @@ HA_TOKEN=your_long_token_here
 SENSOR_SOURCE=sensor.qw_source
 SENSOR_MODE=sensor.qw_mode
 SENSOR_POWERLIMIT=sensor.qw_powerlimit
-SENSOR_GRID_IMPORT=sensor.shellyem3_485519dbeee9_channel_a_energy,sensor.shellyem3_485519dbeee9_channel_b_energy,sensor.shellyem3_485519dbeee9_channel_c_energy
-SENSOR_GRID_EXPORT=sensor.shellyem3_485519dbeee9_channel_a_energy_returned,sensor.shellyem3_485519dbeee9_channel_b_energy_returned,sensor.shellyem3_485519dbeee9_channel_c_energy_returned
+SENSOR_GRID_POWER=sensor.shellyem3_485519dbeee9_channel_a_power,sensor.shellyem3_485519dbeee9_channel_b_power,sensor.shellyem3_485519dbeee9_channel_c_power
 SENSOR_NORDPOOL=sensor.nordpool_kwh_ee_eur_3_10_0
 KRATT_SHARE=0.20
 ```
@@ -48,7 +47,7 @@ KRATT_SHARE=0.20
 
 -   SENSOR_POWERLIMIT (optional): Qilowatt power limit sensor, the power Kratt requested (W or kW). Used to record requested energy and delivery % per slot.
 
--   SENSOR_GRID_IMPORT / SENSOR_GRID_EXPORT: Cumulative grid **energy** counters (Wh, kWh or MWh, read from `unit_of_measurement`), comma-separated. These are typically one per phase, e.g. Shelly 3EM `channel_a/b/c_energy` for import and `channel_a/b/c_energy_returned` for export. Kratt measures at the grid connection point, so these counters are used for the baseline, the delivered mFRR energy and the grid import/export.
+-   SENSOR_GRID_POWER: Grid **power** sensors, one per phase, comma-separated (W or kW, read from `unit_of_measurement`). Positive = importing, negative = exporting, e.g. Shelly 3EM `channel_a/b/c_power`. They should update every few seconds. Kratt measures at the grid connection point, so these sensors are used for the baseline, the delivered mFRR energy and the grid import/export. Cumulative energy counters aren't used, because they typically update only about once a minute.
 
 -   SENSOR_NORDPOOL: Nordpool integration sensor (no VAT/tariffs), price in €/kWh.
 
@@ -59,9 +58,9 @@ KRATT_SHARE=0.20
 **Baseline & mFRR energy**
 --------------------------
 
-Every 10 seconds the tracker reads the energy counters and takes the change since the previous read: **net grid energy = Σ import − Σ export** across all phases. Netting the phases at each read mimics a phase-summing utility meter, so one phase importing while another exports is not counted as both.
+Every 10 seconds the tracker reads all phase powers and sums them into **net grid power** (+import / −export). It integrates that power over the actual time since the previous read (trapezoidal). Summing signed phase powers mimics a phase-summing utility meter, so one phase importing while another exports is not counted as both. Gaps longer than 60 s, e.g. when Home Assistant is unreachable or a sensor is unavailable, are skipped rather than interpolated.
 
-`baseline.py` averages the net grid power, measured from the counters, over each 15-minute slot that had no mFRR command. That average is the baseline. A slot only counts if the counters covered at least 12 minutes of it.
+`baseline.py` averages the net grid power over each 15-minute slot that had no mFRR command. That average is the baseline. A slot only counts if readings covered at least 12 minutes of it.
 
 -   The baseline is locked for the whole run of back-to-back commands. A new baseline is only taken after a full idle 15-minute slot.
 

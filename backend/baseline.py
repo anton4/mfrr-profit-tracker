@@ -1,6 +1,6 @@
 # backend/baseline.py
 # Tracks average net grid power (Kratt meters at the grid connection point) during idle slots,
-# from the cumulative import/export energy counters.
+# integrated from the phase power sensors.
 from datetime import datetime
 import pytz
 from apscheduler.schedulers.background import BackgroundScheduler

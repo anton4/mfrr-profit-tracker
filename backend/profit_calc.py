@@ -35,7 +35,7 @@ def run_profit_calculation():
         direction   = row.get("signal")              # "UP" or "DOWN"
         energy_kwh  = row.get("energy_kwh")          # >= 0, grid deviation in commanded direction
         grid_kwh    = row.get("grid_kwh")            # net: +import, -export
-        # Import/export metered separately (rows recorded before the energy counters only have the net)
+        # Import/export metered separately (older rows only have the net)
         grid_import = row.get("grid_import_kwh")
         grid_export = row.get("grid_export_kwh")
         if grid_import is None or grid_export is None:

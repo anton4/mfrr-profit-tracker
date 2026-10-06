@@ -107,7 +107,7 @@ def write_current_timeslot():
     key = timeslot.isoformat()
     slot_end_time = timeslot + timedelta(minutes=15)
 
-    # Read the counters every tick so the next delta only covers the last ~10 s
+    # Read the meter every tick so the next interval only covers the last ~10 s
     reading = grid_meter.read(now)
     signal = get_signal()
 
@@ -138,7 +138,7 @@ def write_current_timeslot():
     if baseline_w is None:
         baseline_w = get_latest_baseline_w()
 
-    # Grid energy since the previous tick, from the cumulative meter counters
+    # Grid energy since the previous tick, integrated from the phase power sensors
     net_kwh, seconds = reading if reading else (0.0, 0.0)
     requested_w = get_requested_w()
 
