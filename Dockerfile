@@ -1,13 +1,13 @@
 # --- Stage 1: build the React UI ---
-FROM node:20-alpine AS ui
+FROM node:26-alpine AS ui
 WORKDIR /ui
 COPY frontend/package*.json ./
-RUN npm install
+RUN npm ci --no-audit --no-fund
 COPY frontend/ ./
 RUN npm run build
 
 # --- Stage 2: backend + built UI in one image ---
-FROM python:3.11-slim
+FROM python:3.14-slim
 
 ENV PYTHONUNBUFFERED=1
 WORKDIR /app
@@ -18,14 +18,9 @@ RUN apt-get update && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# Install Python requirements
+# Install Python requirements (pip-system-certs makes requests use the system CA certificates)
 COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-
-# Install pip-system-certs to use system CA certificates
-RUN pip install --no-cache-dir pip-system-certs && \
-    ln -s /usr/local/lib/python3.11/site-packages/pip_system_certs/wrapt_requests.py \
-          /usr/local/lib/python3.11/site-packages/requests.pth
 
 COPY backend/ .
 COPY --from=ui /ui/dist ./static
