@@ -3,6 +3,8 @@
 
 Track Manual Frequency Restoration Reserve (mFRR) activations dispatched by **Kratt**, along with grid energy, prices, and profits, in near real-time using Home Assistant. It runs as a single container: a FastAPI backend that also serves the React frontend.
 
+> Originally created by [martinarva](https://github.com/martinarva) as [MFFR-Profit-Tracker](https://github.com/martinarva/MFFR-Profit-Tracker) for Fusebox. This fork adapts it to Kratt.
+
 * * * * *
 
 **Setup**
@@ -11,8 +13,8 @@ Track Manual Frequency Restoration Reserve (mFRR) activations dispatched by **Kr
 ### **1\. Clone the Repository**
 
 ```
-git clone https://github.com/anton4/mFRR-Profit-Tracker.git
-cd mFRR-Profit-Tracker
+git clone https://github.com/anton4/mfrr-profit-tracker.git
+cd mfrr-profit-tracker
 ```
 
 ### **2\. Environment Configuration**
@@ -117,6 +119,13 @@ docker logs -f mfrr-tracker
 cd backend && uvicorn api:app --reload        # API on :8000
 cd frontend && npm install && npm run dev     # UI on :5173, proxies /api to :8000
 ```
+
+* * * * *
+
+**Credits**
+-----------
+
+Original project and idea by [martinarva](https://github.com/martinarva): [martinarva/MFFR-Profit-Tracker](https://github.com/martinarva/MFFR-Profit-Tracker). This fork switches the tracker to Kratt with grid-side metering, takes mFRR prices from the Baltic Transparency Dashboard, and runs as a single container.
 
 * * * * *
 
