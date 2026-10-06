@@ -23,4 +23,7 @@ services:
       - FEE_ELEKTRILEVI_DAY=${FEE_ELEKTRILEVI_DAY:-}
       - FEE_ELEKTRILEVI_NIGHT=${FEE_ELEKTRILEVI_NIGHT:-}
       - FEE_VAT=${FEE_VAT:-}
+      - NEWDAY_USER=${NEWDAY_USER:-}
+      - NEWDAY_PASSWORD=${NEWDAY_PASSWORD:-}
+      - NEWDAY_URL=${NEWDAY_URL:-https://srv.newday.ee/afrr_dashboard.php}
     restart: unless-stopped

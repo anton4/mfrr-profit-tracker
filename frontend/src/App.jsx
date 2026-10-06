@@ -23,7 +23,8 @@ const HINTS = {
   market: 'mFRR: scheduled reserve, starts one minute before a quarter. aFRR: automatic reserve, updated about every minute. ↗ = the minute before an mFRR quarter, priced with the next quarter.',
   minutes: 'Minutes this direction was commanded within the slot.',
   kratt: 'Official regulated energy (kWh) and your share (€) for this slot and direction, from the imported Qilowatt revenue report.',
-  price: 'Balancing energy price for this direction: mFRR from the Baltic Transparency Dashboard, aFRR from Volton. "est." = aFRR price not published yet, estimated.',
+  price: 'Balancing energy price used for income in this direction: mFRR from the Baltic Transparency Dashboard. aFRR uses Volton when published, otherwise an estimate ("est.") calibrated on Kratt reports. "market" = the real aFRR market price (CBMP) during this activation, for comparison.',
+  cbmp: 'Real Estonian aFRR cross-border marginal price (CBMP): the average of the 4-second prices published while this activation ran (from newday.ee). Kratt has paid 1.3–3× this in its reports, so income keeps using the estimate or the imported report.',
   grid: 'Net grid energy during the activation: + import, − export.',
   energyEur: 'Change in your electricity bill at spot price (plus VAT on import) compared with staying at the baseline: extra import costs, extra export earns, avoided import saves.',
   feesEur: 'What network and seller fees add (−) or save (+) for this activation on top of Energy €: network tariff, renewable energy, excise, balancing and security of supply fees, seller margin (with VAT) and export fees. Counted in Net only when Fees is on.',
@@ -648,6 +649,10 @@ function App() {
               <span>
                 {priceSync.afrr_estimated_slots > 0 ? `${priceSync.afrr_estimated_slots} slot(s) estimated` : 'no estimated prices'}
                 {priceSync.afrr_last_check_at && ` · Volton checked ${hm(priceSync.afrr_last_check_at)}`}
+                {priceSync.cbmp_configured
+                  ? ` · market price (CBMP) from newday.ee${priceSync.cbmp_last_check_at ? ` checked ${hm(priceSync.cbmp_last_check_at)}` : ''}`
+                  : ' · market price: newday.ee not configured'}
+                {priceSync.cbmp_last_error && <span className="err"> · {priceSync.cbmp_last_error}</span>}
               </span>
             </div>
             {(priceSync.last_error || priceSync.afrr_last_error) && (
@@ -843,8 +848,15 @@ function App() {
                           <div className={`num r strong ${signClass(netOf(entry))}`}>{fmtEur(netOf(entry))}</div>
                           <div className="num r muted">{kratt(entry)}</div>
                           <div className="num r" title={entry.price_source === 'estimate' ? 'aFRR price not published yet: estimate' : entry.price_source || undefined}>
-                            {entry.mffr_price ?? '–'}
-                            {entry.price_source === 'estimate' && <span className="badge badge-aFRR est">est.</span>}
+                            <span className="price-stack">
+                              <span>
+                                {entry.mffr_price ?? '–'}
+                                {entry.price_source === 'estimate' && <span className="badge badge-aFRR est">est.</span>}
+                              </span>
+                              {entry.market === 'AFRR' && typeof entry.cbmp_avg === 'number' && (
+                                <span className="small muted" title={HINTS.cbmp}>market {Math.round(entry.cbmp_avg)}</span>
+                              )}
+                            </span>
                           </div>
                           <div className="r">
                             <button type="button" className="rowbtn" aria-expanded={open} aria-label="Show details" onClick={() => setOpenRow(open ? null : id)}>
@@ -1068,6 +1080,10 @@ function RowDetails({ entry, feesOn, hm, fmtNum, fmtEur }) {
       <div><div className="muted small"><Hint label="NPS" hint={HINTS.nps} /></div><div className="num">{typeof entry.nordpool_price === 'number' ? `${(entry.nordpool_price * 1000).toFixed(2)} €/MWh` : '–'}</div></div>
       <div><div className="muted small"><Hint label="Baseline" hint={HINTS.baseline} /></div><div className="num">{typeof entry.baseline_w === 'number' ? `${Math.round(entry.baseline_w)} W` : '–'}</div></div>
       <div><div className="muted small"><Hint label="Start → end" hint={HINTS.span} /></div><div className="num">{hm(entry.start)} → {hm(entry.end)}</div></div>
+      {entry.market === 'AFRR' && (
+        <div><div className="muted small"><Hint label="aFRR market price (CBMP)" hint={HINTS.cbmp} /></div>
+          <div className="num">{typeof entry.cbmp_avg === 'number' ? `${entry.cbmp_avg.toFixed(2)} €/MWh · ${entry.cbmp_points} pts` : entry.cbmp_points === 0 ? 'no prices published' : '–'}</div></div>
+      )}
       <div><div className="muted small"><Hint label="€/MWh net" hint={HINTS.perMwh} /></div><div className="num">{typeof ppk === 'number' ? (ppk * 1000).toFixed(2) : '–'}</div></div>
       <div><div className="muted small"><Hint label="Backup" hint={HINTS.backupRow} /></div><div>{yesNo(entry.was_backup)}</div></div>
       <div><div className="muted small"><Hint label="Cancelled" hint={HINTS.cancelledRow} /></div><div>{yesNo(entry.cancelled)}</div></div>

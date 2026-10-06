@@ -179,6 +179,8 @@ How the tracker counts and prices energy, like Kratt's settlement:
 
 -   **mFRR prices** come from the Baltic Transparency Dashboard.
 
+-   **aFRR market price (optional).** With `NEWDAY_USER` / `NEWDAY_PASSWORD` set, the tracker reads the real Estonian aFRR cross-border marginal price (CBMP, per 4-second MTU) from the [newday.ee aFRR dashboard](https://srv.newday.ee/afrr_dashboard.php). It shows the average over each aFRR activation as "market …" under the price. Past days are fetched once and cached. Kratt's reports pay 1.3–3× this market price, even above the slot maximum for UP, so it's shown for comparison only and income keeps using the estimate below or the imported report.
+
 -   **aFRR prices** come from Volton's aFRR clearing price (`public-data.volton.energy/v1/afrr-clearing-price`) once it's published for the slot. Until then the tracker uses an estimate: `AFRR_PRICE_UP_EUR_MWH` (default 440) and `AFRR_PRICE_DOWN_EUR_MWH` (default −530), which are the rates implied by Kratt reports. Estimated prices are marked "est." in the UI. Volton's *capacity* price (€/MW/h) is a different, availability payment and isn't used.
 
 **Import Qilowatt report.** In the backfill panel you can upload the balancing revenue and signals CSVs from qilowatt.it. The official per-slot energy and revenue share are then shown next to the tracker's own figures (Kratt kWh / Kratt €), with an official total in the summary. You can also post a report directly: `POST /api/qw-report` with the CSV as the body.
