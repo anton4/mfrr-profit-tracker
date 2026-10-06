@@ -34,7 +34,13 @@ def run_profit_calculation():
 
         direction   = row.get("signal")              # "UP" or "DOWN"
         energy_kwh  = row.get("energy_kwh")          # >= 0, grid deviation in commanded direction
-        grid_kwh    = row.get("grid_kwh")            # +import, -export
+        grid_kwh    = row.get("grid_kwh")            # net: +import, -export
+        # Import/export metered separately (rows recorded before the energy counters only have the net)
+        grid_import = row.get("grid_import_kwh")
+        grid_export = row.get("grid_export_kwh")
+        if grid_import is None or grid_export is None:
+            grid_import = max(0.0, grid_kwh or 0.0)
+            grid_export = max(0.0, -(grid_kwh or 0.0))
         mffr_price  = row.get("mffr_price")          # €/MWh from your updater
         nps_price   = row.get("nordpool_price")      # €/kWh (Nordpool)
 
@@ -58,11 +64,11 @@ def run_profit_calculation():
         if direction == "DOWN":
             # Commanded DOWN: you increase grid import.
             # Activation revenue is (nps - mffr) * energy (you absorb, so compare against nps).
-            # Grid cost is applied on imported grid energy (positive grid_kwh) with multiplier.
+            # Grid cost is applied on imported grid energy with multiplier.
             activation_income = (nps_price - mffr_eur_per_kwh) * energy_kwh * your_share
             kratt_fee         = activation_income * (KRATT_SHARE / your_share) if your_share > 0 else 0.0
 
-            grid_import_kwh   = grid_kwh if grid_kwh > 0 else 0.0
+            grid_import_kwh   = grid_import
             grid_cost         = nps_price * GRID_IMPORT_MULT * grid_import_kwh
 
             net_total         = activation_income - grid_cost
@@ -82,8 +88,8 @@ def run_profit_calculation():
             activation_income = (mffr_eur_per_kwh - nps_price) * energy_kwh * your_share
             kratt_fee         = activation_income * (KRATT_SHARE / your_share) if your_share > 0 else 0.0
 
-            # Export income component: nps * exported energy (grid_kwh is negative when exporting)
-            grid_export_kwh   = -grid_kwh if grid_kwh < 0 else 0.0
+            # Export income component: nps * exported energy
+            grid_export_kwh   = grid_export
             export_income     = nps_price * grid_export_kwh
 
             net_total         = activation_income + export_income
