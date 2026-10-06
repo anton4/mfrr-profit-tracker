@@ -37,9 +37,10 @@ class SignalBaseline:
     within it keep the baseline, since a new snapshot would include the battery's own response.
     """
 
-    def __init__(self):
+    def __init__(self, store: bool = True):
         self._idle = deque()       # (time, net_kwh, seconds) of recent idle readings
         self.baseline_w = None     # locked value while a run is active
+        self._store_enabled = store   # live tracker records the latest lock in baseline_state
 
     def on_tick(self, now: datetime, reading, active: bool) -> float | None:
         """Feed every tick's meter reading. Returns the locked baseline (W) while active."""
@@ -57,11 +58,12 @@ class SignalBaseline:
             energy_kwh = sum(r[1] for r in self._idle)
             seconds = sum(r[2] for r in self._idle)
             self.baseline_w = round(energy_kwh * 3_600_000.0 / seconds, 1) if seconds > 0 else 0.0
-            if seconds > 0:
-                dlog(f"Locked baseline {self.baseline_w} W from {seconds:.0f} s before the signal")
-            else:
-                dlog("No idle readings before the signal — baseline 0 W")
-            self._store(now, seconds)
+            if self._store_enabled:
+                if seconds > 0:
+                    dlog(f"Locked baseline {self.baseline_w} W from {seconds:.0f} s before the signal")
+                else:
+                    dlog("No idle readings before the signal — baseline 0 W")
+                self._store(now, seconds)
             self._idle.clear()
         return self.baseline_w
 

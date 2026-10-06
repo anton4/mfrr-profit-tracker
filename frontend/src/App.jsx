@@ -11,6 +11,65 @@ function App() {
   const [customRange, setCustomRange] = useState({ from: '', to: '' });
   const [loading, setLoading] = useState(false);
   const [priceSync, setPriceSync] = useState(null);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  // Backfill from Home Assistant history
+  const toLocalInput = (d) => {
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+  const currentSlotStart = () => {
+    const d = new Date();
+    d.setMinutes(Math.floor(d.getMinutes() / 15) * 15, 0, 0);
+    return d;
+  };
+  const [backfillOpen, setBackfillOpen] = useState(false);
+  const [backfillRange, setBackfillRange] = useState(() => {
+    const to = currentSlotStart();
+    return { from: toLocalInput(new Date(to.getTime() - 24 * 3600000)), to: toLocalInput(to) };
+  });
+  const [backfill, setBackfill] = useState(null);
+  const [backfillError, setBackfillError] = useState(null);
+  const backfillRunning = backfill?.state === 'running';
+
+  const loadBackfill = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/backfill`);
+      if (res.ok) setBackfill(await res.json());
+    } catch (e) {
+      console.error('Backfill status fetch failed', e);
+    }
+  };
+  useEffect(() => { loadBackfill(); }, []);
+  // Poll while a backfill runs; reload the table when it finishes
+  useEffect(() => {
+    if (!backfillRunning) return undefined;
+    const poll = setInterval(async () => {
+      const res = await fetch(`${API_BASE}/api/backfill`).catch(() => null);
+      if (!res?.ok) return;
+      const st = await res.json();
+      setBackfill(st);
+      if (st.state !== 'running') setReloadKey((k) => k + 1);
+    }, 2000);
+    return () => clearInterval(poll);
+  }, [backfillRunning]);
+
+  const startBackfill = async () => {
+    setBackfillError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/backfill`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        // datetime-local values are local time; the backend reads naive values as Europe/Tallinn
+        body: JSON.stringify({ from: backfillRange.from, to: backfillRange.to }),
+      });
+      const body = await res.json();
+      if (!res.ok) setBackfillError(body.detail || `Backfill failed (${res.status})`);
+      else setBackfill(body);
+    } catch (e) {
+      setBackfillError(String(e));
+    }
+  };
   const [clock, setClock] = useState(Date.now());
 
   // mFRR price sync status (Baltic Transparency Dashboard), refreshed every 30 s
@@ -187,7 +246,7 @@ function App() {
     fetchData();
     // re-fetch on filter or custom range change
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filter, customRange.from, customRange.to]);
+  }, [filter, customRange.from, customRange.to, reloadKey]);
 
   const summary = useMemo(() => {
     const acc = {
@@ -304,6 +363,63 @@ function App() {
           )}
         </div>
       )}
+
+      <div style={{ marginBottom: '1rem', padding: '0.6rem 0.9rem', border: '1px solid #8884', borderRadius: 6, fontSize: '0.9rem' }}>
+        <button
+          type="button"
+          onClick={() => setBackfillOpen((o) => !o)}
+          style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontWeight: 'bold', color: 'inherit', fontSize: 'inherit' }}
+        >
+          {backfillOpen ? '▾' : '▸'} Backfill from Home Assistant
+          {backfillRunning && ` · running ${backfill.progress}%`}
+        </button>
+        {backfillOpen && (
+          <div style={{ marginTop: '0.6rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
+              <label>
+                From&nbsp;
+                <input
+                  type="datetime-local"
+                  value={backfillRange.from}
+                  onChange={(e) => setBackfillRange({ ...backfillRange, from: e.target.value })}
+                  disabled={backfillRunning}
+                />
+              </label>
+              <label>
+                To&nbsp;
+                <input
+                  type="datetime-local"
+                  value={backfillRange.to}
+                  max={toLocalInput(currentSlotStart())}
+                  onChange={(e) => setBackfillRange({ ...backfillRange, to: e.target.value })}
+                  disabled={backfillRunning}
+                />
+              </label>
+              <button type="button" onClick={startBackfill} disabled={backfillRunning || !backfillRange.from || !backfillRange.to}>
+                {backfillRunning ? 'Backfilling…' : 'Backfill'}
+              </button>
+            </div>
+            <div style={{ opacity: 0.75 }}>
+              Replays Home Assistant history through the tracker. Existing rows in the range are recomputed.
+              The range is rounded to 15-minute slots and stops at the current slot. Home Assistant keeps
+              history for <code>purge_keep_days</code> (10 days by default).
+            </div>
+            {backfillRunning && (
+              <div>
+                <progress value={backfill.progress} max={100} style={{ width: '100%', maxWidth: 400 }} />{' '}
+                {backfill.phase} · {backfill.progress}%
+              </div>
+            )}
+            {backfill && backfill.state === 'done' && (
+              <div style={{ color: 'green' }}>
+                ✓ {backfill.message} ({fmtSlot(backfill.from).split('–')[0]} → {fmtSlot(backfill.to).split('–')[0]})
+              </div>
+            )}
+            {backfill && backfill.state === 'error' && <div style={{ color: '#d33' }}>✗ {backfill.message}</div>}
+            {backfillError && <div style={{ color: '#d33' }}>✗ {backfillError}</div>}
+          </div>
+        )}
+      </div>
 
       <div style={{ marginBottom: '1rem' }}>
         <label>Filter:&nbsp;</label>

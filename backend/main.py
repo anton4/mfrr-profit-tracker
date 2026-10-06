@@ -76,10 +76,6 @@ for column, col_type in required_columns.items():
 init_db["slots"].create_index(["timeslot"], if_not_exists=True)
 init_db["slots"].create_index(["duration_min", "end"], if_not_exists=True)
 
-last_logged_signal = None
-grid_meter = GridMeter()
-signal_baseline = SignalBaseline()
-
 def _with_busy_timeout(db: Database, ms: int = 5000):
     try:
         db.conn.execute(f"PRAGMA busy_timeout={ms};")
@@ -107,135 +103,158 @@ def cleanup_zero_min_rows():
 def slot_id(timeslot: str, signal: str) -> str:
     return f"{timeslot}_{signal}"
 
-def write_current_timeslot():
-    global last_logged_signal
-    db = Database(DB_PATH)
-    _with_busy_timeout(db)
+class Tracker:
+    """Turns ticks of HA state into slot rows. The live job has one instance; a backfill
+    replays recorded history through its own instance with the same logic."""
 
-    now = datetime.now(tz).replace(microsecond=0)
-    minute = (now.minute // 15) * 15
-    timeslot = now.replace(minute=minute, second=0)
-    key = timeslot.isoformat()
-    slot_end_time = timeslot + timedelta(minutes=15)
+    def __init__(self, store_baseline: bool = True):
+        self.meter = GridMeter()
+        self.baseline = SignalBaseline(store=store_baseline)
+        self.last_logged_signal = None
 
-    # Read the meter every tick so the next interval only covers the last ~10 s
-    reading = grid_meter.read(now, slot_start=timeslot)
-    signal = get_signal()
-    # Snapshot of the grid state just before the signal, locked for the run
-    baseline_w = signal_baseline.on_tick(now, reading, active=signal is not None)
+    def tick(self, now: datetime, fetch=None, write=True, live=True, db: Database | None = None):
+        """Process one 10 s tick at `now`.
 
-    if signal != last_logged_signal:
-        print(f"🔔 Signal became {signal} at {now.isoformat()}")
-        last_logged_signal = signal
+        fetch:  HA state reader (None = live HA); a backfill passes recorded history.
+        write:  False for warm-up ticks that only feed the meter and baseline.
+        live:   False skips the Nord Pool sensor (a backfill sets prices itself).
+        """
+        if db is None:
+            db = Database(DB_PATH)
+            _with_busy_timeout(db)
 
-    if not signal:
-        return
+        minute = (now.minute // 15) * 15
+        timeslot = now.replace(minute=minute, second=0)
+        key = timeslot.isoformat()
+        slot_end_time = timeslot + timedelta(minutes=15)
 
-    row_id = slot_id(key, signal)
-    try:
-        row = db["slots"].get(row_id)
-    except NotFoundError:
-        row = None
+        # Read the meter every tick so the next interval only covers the last ~10 s
+        reading = self.meter.read(now, slot_start=timeslot, fetch=fetch)
+        signal = get_signal(fetch)
+        # Snapshot of the grid state just before the signal, locked for the run
+        baseline_w = self.baseline.on_tick(now, reading, active=signal is not None)
 
-    # Grid energy since the previous tick, integrated from the phase power sensors
-    net_kwh, seconds = reading if reading else (0.0, 0.0)
-    requested_w = get_requested_w()
+        if signal != self.last_logged_signal:
+            if live:
+                print(f"🔔 Signal became {signal} at {now.isoformat()}")
+            self.last_logged_signal = signal
 
-    def totals(prev: dict | None) -> dict:
-        """Add this tick to the slot totals; mFRR energy is evaluated over the whole slot."""
-        prev = prev or {}
-        grid_kwh = (prev.get("grid_kwh") or 0.0) + net_kwh
-        metered_s = (prev.get("metered_s") or 0.0) + seconds
-        # Baseline energy is accumulated per tick, so several runs in one slot keep their own baseline
-        baseline_tick_kwh = baseline_w * seconds / 3_600_000.0
-        baseline_import = (prev.get("baseline_import_kwh") or 0.0) + max(0.0, baseline_tick_kwh)
-        baseline_export = (prev.get("baseline_export_kwh") or 0.0) + max(0.0, -baseline_tick_kwh)
-        energy_kwh = mffr_energy_kwh(signal, grid_kwh, baseline_import - baseline_export)
-        requested_kwh = (prev.get("requested_kwh") or 0.0) + (requested_w or 0.0) / 1000.0 * seconds / 3600.0
-        return {
-            "grid_kwh": round(grid_kwh, 5),
-            "grid_import_kwh": round((prev.get("grid_import_kwh") or 0.0) + max(0.0, net_kwh), 5),
-            "grid_export_kwh": round((prev.get("grid_export_kwh") or 0.0) + max(0.0, -net_kwh), 5),
-            "metered_s": round(metered_s, 1),
-            "baseline_import_kwh": round(baseline_import, 5),
-            "baseline_export_kwh": round(baseline_export, 5),
-            "baseline_w": baseline_w,
-            "energy_kwh": round(energy_kwh, 5),
-            "requested_kwh": round(requested_kwh, 5),
-            "delivery_pct": round(energy_kwh / requested_kwh * 100.0, 1) if requested_kwh > 0 else None,
-        }
-
-    if row:
-        end_time = datetime.fromisoformat(row["end"])
-        if end_time < slot_end_time:
-            start_time = datetime.fromisoformat(row["start"])
-            # Count only time this direction was active: after a flip and back, the gap since
-            # this row's last tick is not added (capped at about one tick)
-            since_last_s = (now - end_time).total_seconds()
-            active_s = (row.get("active_s") or 0.0) + (since_last_s if since_last_s <= 20 else 10.0)
-            cancelled = now < (slot_end_time - timedelta(seconds=11))
-            was_backup = (start_time - timeslot).total_seconds() >= 15
-
-            update_data = {
-                **totals(row),
-                "end": now.isoformat(),
-                "active_s": round(active_s, 1),
-                "duration_min": round(active_s / 60),
-                "cancelled": cancelled,
-                "was_backup": was_backup,
-                "slot_end": slot_end_time.isoformat(),
-            }
-            db["slots"].update(row_id, update_data)
-    else:
-        if (now - timeslot).total_seconds() < 5:
+        if not signal or not write:
             return
 
+        row_id = slot_id(key, signal)
         try:
-            prev_slot_time = timeslot - timedelta(minutes=15)
-            previous = db["slots"].get(slot_id(prev_slot_time.isoformat(), signal))
-            previous_end = datetime.fromisoformat(previous["end"])
-            if abs((now - previous_end).total_seconds()) <= 7:
-                return
+            row = db["slots"].get(row_id)
         except NotFoundError:
-            pass
+            row = None
 
-        entry = {
-            "id": row_id,
-            "timeslot": key,
-            "start": now.isoformat(),
-            "end": now.isoformat(),
-            "signal": signal,
-            **totals(None),
-            "mffr_price": None,
-            "nordpool_price": None,
-            "profit": None,
-            "duration_min": 0,
-            "active_s": seconds or 10.0,
-            "cancelled": False,
-            "was_backup": False,
-            "slot_end": slot_end_time.isoformat(),
-        }
-        db["slots"].insert(entry, pk="id", alter=True)
+        # Grid energy since the previous tick, integrated from the phase power sensors
+        net_kwh, seconds = reading if reading else (0.0, 0.0)
+        requested_w = get_requested_w(fetch)
 
-    try:
-        attrs = (get_entity(SENSOR_NORDPOOL) or {}).get("attributes", {})
-        raw_today = attrs.get("raw_today", []) or []
-        raw_tomorrow = attrs.get("raw_tomorrow", []) or []
-        for p in (raw_today + raw_tomorrow):
-            start = datetime.fromisoformat(p["start"])
-            end = datetime.fromisoformat(p["end"])
-            if start <= timeslot < end:
-                price = round(p["value"], 5)
-                try:
-                    row = db["slots"].get(row_id)
-                    if row.get("nordpool_price") is None:
-                        db["slots"].update(row_id, {"nordpool_price": price})
-                        print(f"📈 Set Nordpool price {price} €/kWh for slot {row_id}")
-                except NotFoundError:
-                    pass
-                break
-    except Exception as e:
-        print(f"❌ Failed to fetch Nordpool price: {e}")
+        def totals(prev: dict | None) -> dict:
+            """Add this tick to the slot totals; mFRR energy is evaluated over the whole slot."""
+            prev = prev or {}
+            grid_kwh = (prev.get("grid_kwh") or 0.0) + net_kwh
+            metered_s = (prev.get("metered_s") or 0.0) + seconds
+            # Baseline energy is accumulated per tick, so several runs in one slot keep their own baseline
+            baseline_tick_kwh = baseline_w * seconds / 3_600_000.0
+            baseline_import = (prev.get("baseline_import_kwh") or 0.0) + max(0.0, baseline_tick_kwh)
+            baseline_export = (prev.get("baseline_export_kwh") or 0.0) + max(0.0, -baseline_tick_kwh)
+            energy_kwh = mffr_energy_kwh(signal, grid_kwh, baseline_import - baseline_export)
+            requested_kwh = (prev.get("requested_kwh") or 0.0) + (requested_w or 0.0) / 1000.0 * seconds / 3600.0
+            return {
+                "grid_kwh": round(grid_kwh, 5),
+                "grid_import_kwh": round((prev.get("grid_import_kwh") or 0.0) + max(0.0, net_kwh), 5),
+                "grid_export_kwh": round((prev.get("grid_export_kwh") or 0.0) + max(0.0, -net_kwh), 5),
+                "metered_s": round(metered_s, 1),
+                "baseline_import_kwh": round(baseline_import, 5),
+                "baseline_export_kwh": round(baseline_export, 5),
+                "baseline_w": baseline_w,
+                "energy_kwh": round(energy_kwh, 5),
+                "requested_kwh": round(requested_kwh, 5),
+                "delivery_pct": round(energy_kwh / requested_kwh * 100.0, 1) if requested_kwh > 0 else None,
+            }
+
+        if row:
+            end_time = datetime.fromisoformat(row["end"])
+            if end_time < slot_end_time:
+                start_time = datetime.fromisoformat(row["start"])
+                # Count only time this direction was active: after a flip and back, the gap since
+                # this row's last tick is not added (capped at about one tick)
+                since_last_s = (now - end_time).total_seconds()
+                active_s = (row.get("active_s") or 0.0) + (since_last_s if since_last_s <= 20 else 10.0)
+                cancelled = now < (slot_end_time - timedelta(seconds=11))
+                was_backup = (start_time - timeslot).total_seconds() >= 15
+
+                update_data = {
+                    **totals(row),
+                    "end": now.isoformat(),
+                    "active_s": round(active_s, 1),
+                    "duration_min": round(active_s / 60),
+                    "cancelled": cancelled,
+                    "was_backup": was_backup,
+                    "slot_end": slot_end_time.isoformat(),
+                }
+                db["slots"].update(row_id, update_data)
+        else:
+            if (now - timeslot).total_seconds() < 5:
+                return
+
+            try:
+                prev_slot_time = timeslot - timedelta(minutes=15)
+                previous = db["slots"].get(slot_id(prev_slot_time.isoformat(), signal))
+                previous_end = datetime.fromisoformat(previous["end"])
+                if abs((now - previous_end).total_seconds()) <= 7:
+                    return
+            except NotFoundError:
+                pass
+
+            entry = {
+                "id": row_id,
+                "timeslot": key,
+                "start": now.isoformat(),
+                "end": now.isoformat(),
+                "signal": signal,
+                **totals(None),
+                "mffr_price": None,
+                "nordpool_price": None,
+                "profit": None,
+                "duration_min": 0,
+                "active_s": seconds or 10.0,
+                "cancelled": False,
+                "was_backup": False,
+                "slot_end": slot_end_time.isoformat(),
+            }
+            db["slots"].insert(entry, pk="id", alter=True)
+
+        if not live:
+            return
+        try:
+            attrs = (get_entity(SENSOR_NORDPOOL) or {}).get("attributes", {})
+            raw_today = attrs.get("raw_today", []) or []
+            raw_tomorrow = attrs.get("raw_tomorrow", []) or []
+            for p in (raw_today + raw_tomorrow):
+                start = datetime.fromisoformat(p["start"])
+                end = datetime.fromisoformat(p["end"])
+                if start <= timeslot < end:
+                    price = round(p["value"], 5)
+                    try:
+                        row = db["slots"].get(row_id)
+                        if row.get("nordpool_price") is None:
+                            db["slots"].update(row_id, {"nordpool_price": price})
+                            print(f"📈 Set Nordpool price {price} €/kWh for slot {row_id}")
+                    except NotFoundError:
+                        pass
+                    break
+        except Exception as e:
+            print(f"❌ Failed to fetch Nordpool price: {e}")
+
+
+live_tracker = Tracker()
+
+def write_current_timeslot():
+    live_tracker.tick(datetime.now(tz).replace(microsecond=0))
 
 # Scheduler is started by FastAPI (api.py)
 scheduler = BackgroundScheduler()

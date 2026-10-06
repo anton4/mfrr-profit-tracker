@@ -113,10 +113,37 @@ The sync runs every minute and always checks the last 3 hours, so the latest pub
 
 * * * * *
 
+**Backfill from Home Assistant**
+--------------------------------
+
+Rebuilds the slot rows for a past period from Home Assistant's recorded history. Use it for periods when the tracker wasn't running, or to recompute rows recorded by older versions.
+
+-   The tracker reads the history of `SENSOR_SOURCE`, `SENSOR_MODE`, `SENSOR_POWERLIMIT` and the `SENSOR_GRID_POWER` phases through the HA REST history API, with the same `HA_URL` / `HA_TOKEN`. It replays that history every 10 s through **the same logic as the live tracker**: signal detection, power integration and gap handling, the signal-time baseline, and per-direction rows. Backfilled rows are therefore calculated exactly like live ones.
+
+-   HA stores only state changes, so between changes the last value is assumed to hold. The replay starts 30 minutes before the range so the meter and the pre-signal baseline are primed.
+
+-   **Existing rows in the range are deleted and recomputed.** The range is rounded to 15-minute slots and stops at the start of the current slot, so it never touches the slot the live tracker is writing.
+
+-   mFRR prices come from the Baltic Transparency Dashboard for the whole range. Nord Pool prices come from Elering's public API (`dashboard.elering.ee/api/nps/price`, Estonia). Profit is then recalculated.
+
+-   HA keeps history for the recorder's `purge_keep_days`, 10 days by default. Older ranges return a "no history" error.
+
+How to run it:
+
+-   **UI:** the "Backfill from Home Assistant" panel. Pick from/to and click Backfill. It shows progress and reloads the table when done.
+
+-   **API:** `POST /api/backfill` with `{"from": "2026-09-28T00:00", "to": "2026-10-05T00:00"}` (local time). `GET /api/backfill` returns the status. Only one backfill runs at a time.
+
+-   **CLI:** `docker exec mfrr-tracker python backfill.py --from 2026-09-28 --to 2026-10-05`
+
+* * * * *
+
 **Code layout**
 ---------------
 
--   backend/api.py: FastAPI app. Serves `/api/mffr`, `/api/price-sync` and the built UI, and starts all schedulers.
+-   backend/api.py: FastAPI app. Serves `/api/mffr`, `/api/price-sync`, `/api/backfill` and the built UI, and starts all schedulers.
+
+-   backend/backfill.py / backend/history.py: Backfill from the HA history API.
 
 -   backend/ha.py: Home Assistant access and Kratt signal detection.
 
