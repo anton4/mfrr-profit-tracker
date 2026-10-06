@@ -7,6 +7,7 @@ from sqlite_utils import Database
 from sqlite_utils.db import NotFoundError
 
 from ha import SENSOR_NORDPOOL, GridMeter, get_entity, get_requested_w, get_signal, mffr_energy_kwh
+from baseline import SignalBaseline
 
 DB_PATH = "data/mffr.db"
 tz = pytz.timezone("Europe/Tallinn")
@@ -50,10 +51,12 @@ required_columns = {
     "grid_kwh": float,         # net grid energy (+import / -export)
     "grid_import_kwh": float,  # import part, netted across phases per read
     "grid_export_kwh": float,  # export part, netted across phases per read
-    "metered_s": float,        # seconds covered by meter reads (for baseline energy)
+    "metered_s": float,        # seconds covered by meter reads
+    "baseline_import_kwh": float,  # what the baseline would have imported over the metered time
+    "baseline_export_kwh": float,  # what the baseline would have exported over the metered time
     "requested_kwh": float,    # energy Kratt asked for (qw_powerlimit × metered time)
     "delivery_pct": float,     # delivered mFRR energy / requested energy
-    "baseline_w": float        # snapshot of baseline per slot
+    "baseline_w": float        # locked baseline of the (latest) run in this slot
 }
 for column, col_type in required_columns.items():
     if column not in init_db["slots"].columns_dict:
@@ -65,20 +68,13 @@ init_db["slots"].create_index(["duration_min", "end"], if_not_exists=True)
 
 last_logged_signal = None
 grid_meter = GridMeter()
+signal_baseline = SignalBaseline()
 
 def _with_busy_timeout(db: Database, ms: int = 5000):
     try:
         db.conn.execute(f"PRAGMA busy_timeout={ms};")
     except Exception:
         pass
-
-def get_latest_baseline_w() -> float:
-    try:
-        db = Database(DB_PATH)
-        row = db["baseline_state"].get("latest")
-        return float(row["baseline_w"])
-    except Exception:
-        return 0.0  # Default fallback if not available
 
 def cleanup_zero_min_rows():
     db = Database(DB_PATH)
@@ -110,6 +106,8 @@ def write_current_timeslot():
     # Read the meter every tick so the next interval only covers the last ~10 s
     reading = grid_meter.read(now, slot_start=timeslot)
     signal = get_signal()
+    # Snapshot of the grid state just before the signal, locked for the run
+    baseline_w = signal_baseline.on_tick(now, reading, active=signal is not None)
 
     if signal != last_logged_signal:
         print(f"🔔 Signal became {signal} at {now.isoformat()}")
@@ -123,21 +121,6 @@ def write_current_timeslot():
     except NotFoundError:
         row = None
 
-    # Baseline is locked per command run: reuse the snapshot stored on this slot,
-    # else carry it over from the directly preceding slot of the same run,
-    # else take the latest idle-slot baseline.
-    baseline_w = row.get("baseline_w") if row and row["signal"] == signal else None
-    if baseline_w is None:
-        try:
-            previous = db["slots"].get((timeslot - timedelta(minutes=15)).isoformat())
-            if previous.get("baseline_w") is not None and \
-                    (timeslot - datetime.fromisoformat(previous["end"])).total_seconds() <= 30:
-                baseline_w = previous["baseline_w"]
-        except NotFoundError:
-            pass
-    if baseline_w is None:
-        baseline_w = get_latest_baseline_w()
-
     # Grid energy since the previous tick, integrated from the phase power sensors
     net_kwh, seconds = reading if reading else (0.0, 0.0)
     requested_w = get_requested_w()
@@ -147,13 +130,20 @@ def write_current_timeslot():
         prev = prev or {}
         grid_kwh = (prev.get("grid_kwh") or 0.0) + net_kwh
         metered_s = (prev.get("metered_s") or 0.0) + seconds
-        energy_kwh = mffr_energy_kwh(signal, grid_kwh, metered_s, baseline_w)
+        # Baseline energy is accumulated per tick, so several runs in one slot keep their own baseline
+        baseline_tick_kwh = baseline_w * seconds / 3_600_000.0
+        baseline_import = (prev.get("baseline_import_kwh") or 0.0) + max(0.0, baseline_tick_kwh)
+        baseline_export = (prev.get("baseline_export_kwh") or 0.0) + max(0.0, -baseline_tick_kwh)
+        energy_kwh = mffr_energy_kwh(signal, grid_kwh, baseline_import - baseline_export)
         requested_kwh = (prev.get("requested_kwh") or 0.0) + (requested_w or 0.0) / 1000.0 * seconds / 3600.0
         return {
             "grid_kwh": round(grid_kwh, 5),
             "grid_import_kwh": round((prev.get("grid_import_kwh") or 0.0) + max(0.0, net_kwh), 5),
             "grid_export_kwh": round((prev.get("grid_export_kwh") or 0.0) + max(0.0, -net_kwh), 5),
             "metered_s": round(metered_s, 1),
+            "baseline_import_kwh": round(baseline_import, 5),
+            "baseline_export_kwh": round(baseline_export, 5),
+            "baseline_w": baseline_w,
             "energy_kwh": round(energy_kwh, 5),
             "requested_kwh": round(requested_kwh, 5),
             "delivery_pct": round(energy_kwh / requested_kwh * 100.0, 1) if requested_kwh > 0 else None,
@@ -176,9 +166,6 @@ def write_current_timeslot():
                 "was_backup": was_backup,
                 "slot_end": slot_end_time.isoformat(),
             }
-            if row.get("baseline_w") is None:
-                update_data["baseline_w"] = baseline_w
-
             db["slots"].update(key, update_data)
     else:
         if (now - timeslot).total_seconds() < 5:
@@ -206,7 +193,6 @@ def write_current_timeslot():
             "cancelled": False,
             "was_backup": False,
             "slot_end": slot_end_time.isoformat(),
-            "baseline_w": baseline_w,
         }
         db["slots"].insert(entry, pk="timeslot", replace=True)
 
