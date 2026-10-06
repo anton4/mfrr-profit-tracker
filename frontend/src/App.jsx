@@ -4,6 +4,52 @@ import './App.css';
 
 const API_BASE = ""; // same origin: the backend serves this UI (vite dev proxies /api)
 
+// Column explanations shown by <Hint>
+const HINTS = {
+  split: 'Share of all activations in this direction. Ramp minutes (↗) are not counted as separate activations.',
+  count: 'Number of activations: one per 15-minute slot, market and direction. Ramp minutes (↗) are not counted.',
+  duration: 'Total time Kratt commanded this direction.',
+  energy: 'Regulated energy, measured at the grid connection against the baseline (the grid power just before the signal). DOWN = extra import or less export, UP = extra export or less import. This is the energy Kratt settles.',
+  requested: 'Energy Kratt asked for: the requested power (qw_powerlimit) × the time it was requested.',
+  delivery: 'Regulated energy ÷ requested energy. 100% means the battery followed the command fully; above 100% is overshoot.',
+  activation: 'Your share of Kratt\'s activation revenue after Kratt\'s fee (20% by default). UP: (market price − NPS) × energy; DOWN: (NPS − market price) × energy.',
+  net: 'Activation revenue plus the change in your electricity bill compared with staying at the baseline. With Fees on, network and seller fees are included; otherwise import is spot + VAT and export is spot.',
+  avg: 'Net result per MWh of regulated energy.',
+  backup: 'Share of activations that started 15 s or more after their slot began (joined mid-slot).',
+  cancelled: 'Share of activations that ended before their slot did. For mFRR the slot\'s last minute belongs to the next activation.',
+  report: 'Official totals from the imported Qilowatt (KratTrade) revenue report for this period.',
+  slot: 'Start of the 15-minute settlement period, local time.',
+  direction: 'DOWN: Kratt asked you to consume more (charge, import). UP: deliver more (discharge, export).',
+  market: 'mFRR: scheduled reserve, starts one minute before a quarter. aFRR: automatic reserve, updated about every minute. ↗ = the minute before an mFRR quarter, priced with the next quarter.',
+  minutes: 'Minutes this direction was commanded within the slot.',
+  kratt: 'Official regulated energy (kWh) and your share (€) for this slot and direction, from the imported Qilowatt revenue report.',
+  price: 'Balancing energy price for this direction: mFRR from the Baltic Transparency Dashboard, aFRR from Volton. "est." = aFRR price not published yet, estimated.',
+  grid: 'Net grid energy during the activation: + import, − export.',
+  bill: 'Change in your electricity bill compared with what the baseline would have imported or exported in the same time.',
+  rate: 'Network tariff period of the slot: day, night/weekend/holiday, or Võrk 5 winter peak.',
+  nps: 'Nord Pool day-ahead (spot) price for the slot.',
+  baseline: 'Grid power just before the Kratt signal, locked for the whole run. Energy is measured against it.',
+  span: 'First and last moment the tracker saw this activation in the slot.',
+  perMwh: 'Net result per MWh of regulated energy for this row.',
+  backupRow: 'Started 15 s or more after the slot began.',
+  cancelledRow: 'Ended before the slot did.',
+};
+
+// Label with an ⓘ button: explanation on hover, keyboard focus or tap
+function Hint({ label, hint, align = 'left' }) {
+  return (
+    <span className="hint">
+      <span>{label}</span>
+      <button type="button" className="hint-btn" aria-label={`${label}: ${hint}`}>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="9.5" /><path d="M12 11v6M12 7.5v.01" />
+        </svg>
+      </button>
+      <span className={`hint-pop hint-${align}`} role="tooltip">{hint}</span>
+    </span>
+  );
+}
+
 function App() {
   const [darkMode, setDarkModeState] = useState(() => {
     try {
@@ -634,15 +680,15 @@ function App() {
             <div className="scroll-x">
               <div className="dir-grid">
                 <div className="th" />
-                <div className="th r">Split</div>
-                <div className="th r">Count</div>
-                <div className="th r">Duration</div>
-                <div className="th r">Energy</div>
-                <div className="th r">Activation</div>
-                <div className="th r">Net</div>
-                <div className="th r">Avg €/MWh</div>
-                <div className="th r">Backup</div>
-                <div className="th r">Cancelled</div>
+                <div className="th r"><Hint label="Split" hint={HINTS.split} /></div>
+                <div className="th r"><Hint label="Count" hint={HINTS.count} /></div>
+                <div className="th r"><Hint label="Duration" hint={HINTS.duration} /></div>
+                <div className="th r"><Hint label="Energy" hint={HINTS.energy} /></div>
+                <div className="th r"><Hint label="Activation" hint={HINTS.activation} /></div>
+                <div className="th r"><Hint label="Net" hint={HINTS.net} /></div>
+                <div className="th r"><Hint label="Avg €/MWh" hint={HINTS.avg} align="right" /></div>
+                <div className="th r"><Hint label="Backup" hint={HINTS.backup} align="right" /></div>
+                <div className="th r"><Hint label="Cancelled" hint={HINTS.cancelled} align="right" /></div>
                 {directionRows.map(([dir, b, split]) => (
                   <div className="dir-row" key={dir}>
                     <div><span className={`pill pill-${dir}`}>{dir}</span></div>
@@ -671,7 +717,7 @@ function App() {
                 </div>
                 {hasReport && (
                   <div className="dir-row report">
-                    <div>Kratt report</div>
+                    <div><Hint label="Kratt report" hint={HINTS.report} /></div>
                     <div /><div /><div />
                     <div className="num r">{fmtNum(officialTotal.kwh)} kWh</div>
                     <div className="num r">{fmtNum(officialTotal.share)} €</div>
@@ -815,9 +861,18 @@ function App() {
               <div className="scroll-x act-table">
                 <div className="act-inner">
                   <div className="act-grid act-head">
-                    <div>Slot</div><div>Direction</div><div>Market</div><div className="r">Min</div><div className="r">Energy</div>
-                    <div className="r">Requested</div><div className="pl">Delivery</div><div className="r">Activation</div>
-                    <div className="r">Kratt kWh · €</div><div className="r">Net</div><div className="r">Price €/MWh</div><div />
+                    <div><Hint label="Slot" hint={HINTS.slot} /></div>
+                    <div><Hint label="Direction" hint={HINTS.direction} /></div>
+                    <div><Hint label="Market" hint={HINTS.market} /></div>
+                    <div className="r"><Hint label="Min" hint={HINTS.minutes} /></div>
+                    <div className="r"><Hint label="Energy" hint={HINTS.energy} /></div>
+                    <div className="r"><Hint label="Requested" hint={HINTS.requested} /></div>
+                    <div className="pl"><Hint label="Delivery" hint={HINTS.delivery} /></div>
+                    <div className="r"><Hint label="Activation" hint={HINTS.activation} /></div>
+                    <div className="r"><Hint label="Kratt kWh · €" hint={HINTS.kratt} align="right" /></div>
+                    <div className="r"><Hint label="Net" hint={HINTS.net} align="right" /></div>
+                    <div className="r"><Hint label="Price €/MWh" hint={HINTS.price} align="right" /></div>
+                    <div />
                   </div>
                   {data.map((entry, idx) => {
                     const id = entry.id ?? String(idx);
@@ -874,9 +929,9 @@ function App() {
                         <span className="num muted small">{entry.slot_date} {entry.slot_time}</span>
                       </div>
                       <div className="act-card-grid">
-                        <div><div className="muted small">Energy</div><div className="num">{fmtNum(entry.energy_kwh)} kWh</div></div>
-                        <div><div className="muted small">Delivery</div><div className="num">{typeof entry.delivery_pct === 'number' ? `${Math.round(entry.delivery_pct)}%` : '–'}</div></div>
-                        <div className="r"><div className="muted small">Net</div><div className={`num strong ${signClass(netOf(entry))}`}>{fmtEur(netOf(entry))}</div></div>
+                        <div><div className="muted small"><Hint label="Energy" hint={HINTS.energy} /></div><div className="num">{fmtNum(entry.energy_kwh)} kWh</div></div>
+                        <div><div className="muted small"><Hint label="Delivery" hint={HINTS.delivery} /></div><div className="num">{typeof entry.delivery_pct === 'number' ? `${Math.round(entry.delivery_pct)}%` : '–'}</div></div>
+                        <div className="r"><div className="muted small"><Hint label="Net" hint={HINTS.net} align="right" /></div><div className={`num strong ${signClass(netOf(entry))}`}>{fmtEur(netOf(entry))}</div></div>
                       </div>
                       <div className="act-card-foot small muted">
                         <span>Price <span className="num text">{entry.mffr_price ?? '–'}</span>{entry.price_source === 'estimate' ? ' est.' : ''}</span>
@@ -904,15 +959,15 @@ function RowDetails({ entry, feesOn, hm, fmtNum, fmtEur }) {
   const yesNo = (v) => (v === undefined || v === null ? '–' : v ? 'Yes' : 'No');
   return (
     <div className="details">
-      <div><div className="muted small">Grid</div><div className="num">{fmtNum(entry.grid_kwh)} kWh</div></div>
-      <div><div className="muted small">Bill effect{feesOn ? ' (with fees)' : ''}</div><div className="num">{typeof gridCost === 'number' ? fmtEur(-gridCost) : '–'}</div></div>
-      <div><div className="muted small">Network rate</div><div>{{ day: 'Day', night: 'Night / weekend', day_peak: 'Day peak', holiday_peak: 'Weekend peak' }[entry.tariff_period] ?? '–'}</div></div>
-      <div><div className="muted small">NPS</div><div className="num">{typeof entry.nordpool_price === 'number' ? `${(entry.nordpool_price * 1000).toFixed(2)} €/MWh` : '–'}</div></div>
-      <div><div className="muted small">Baseline</div><div className="num">{typeof entry.baseline_w === 'number' ? `${Math.round(entry.baseline_w)} W` : '–'}</div></div>
-      <div><div className="muted small">Start → end</div><div className="num">{hm(entry.start)} → {hm(entry.end)}</div></div>
-      <div><div className="muted small">€/MWh net</div><div className="num">{typeof ppk === 'number' ? (ppk * 1000).toFixed(2) : '–'}</div></div>
-      <div><div className="muted small">Backup</div><div>{yesNo(entry.was_backup)}</div></div>
-      <div><div className="muted small">Cancelled</div><div>{yesNo(entry.cancelled)}</div></div>
+      <div><div className="muted small"><Hint label="Grid" hint={HINTS.grid} /></div><div className="num">{fmtNum(entry.grid_kwh)} kWh</div></div>
+      <div><div className="muted small"><Hint label={feesOn ? 'Bill effect (with fees)' : 'Bill effect'} hint={HINTS.bill} /></div><div className="num">{typeof gridCost === 'number' ? fmtEur(-gridCost) : '–'}</div></div>
+      <div><div className="muted small"><Hint label="Network rate" hint={HINTS.rate} /></div><div>{{ day: 'Day', night: 'Night / weekend', day_peak: 'Day peak', holiday_peak: 'Weekend peak' }[entry.tariff_period] ?? '–'}</div></div>
+      <div><div className="muted small"><Hint label="NPS" hint={HINTS.nps} /></div><div className="num">{typeof entry.nordpool_price === 'number' ? `${(entry.nordpool_price * 1000).toFixed(2)} €/MWh` : '–'}</div></div>
+      <div><div className="muted small"><Hint label="Baseline" hint={HINTS.baseline} /></div><div className="num">{typeof entry.baseline_w === 'number' ? `${Math.round(entry.baseline_w)} W` : '–'}</div></div>
+      <div><div className="muted small"><Hint label="Start → end" hint={HINTS.span} /></div><div className="num">{hm(entry.start)} → {hm(entry.end)}</div></div>
+      <div><div className="muted small"><Hint label="€/MWh net" hint={HINTS.perMwh} /></div><div className="num">{typeof ppk === 'number' ? (ppk * 1000).toFixed(2) : '–'}</div></div>
+      <div><div className="muted small"><Hint label="Backup" hint={HINTS.backupRow} /></div><div>{yesNo(entry.was_backup)}</div></div>
+      <div><div className="muted small"><Hint label="Cancelled" hint={HINTS.cancelledRow} /></div><div>{yesNo(entry.cancelled)}</div></div>
     </div>
   );
 }
