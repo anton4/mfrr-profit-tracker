@@ -104,7 +104,7 @@ def get_mffr_data(
     fee_values = fees.get_fees(_db)
     for row in rows:
         slot = row.get("price_timeslot") or row.get("timeslot")
-        row["tariff_period"] = ("night" if fees.is_night(datetime.fromisoformat(slot)) else "day") if slot else None
+        row["tariff_period"] = fees.network_period(datetime.fromisoformat(slot), fee_values) if slot else None
         bill = fees.bill_effect(row, with_fees=True, fees=fee_values) if row.get("profit") is not None else None
         if bill is None:
             row["grid_cost_fees"] = row["net_total_fees"] = row["price_per_kwh_fees"] = None
@@ -125,6 +125,8 @@ def get_fee_settings():
         "values": fees.get_fees(),
         "defaults": fees.DEFAULTS,
         "labels": {k: label for k, (label, _) in fees.FIELDS.items()},
+        "packages": fees.PACKAGES,
+        "network_keys": list(fees.NETWORK_KEYS),
         "unit": "s/kWh",
     }
 

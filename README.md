@@ -143,7 +143,18 @@ Edit the fees under **Data tools → Electricity fees**. Values are in cents/kWh
 | VAT | 24 % |
 | Export margin, export balancing fee | 0 (contract-specific) |
 
-Defaults can be overridden with `FEE_MARGIN`, `FEE_TAASTUV`, `FEE_AKTSIIS`, `FEE_TASAKAAL`, `FEE_VARUSTUS`, `FEE_ELEKTRILEVI_DAY`, `FEE_ELEKTRILEVI_NIGHT`, `FEE_VAT`, `FEE_EXPORT_MARGIN` and `FEE_EXPORT_TASAKAAL`. One set of values applies to all history; rate changes over time aren't modelled. Pick the day/night prices of your own Elektrilevi package from its price list (excl. VAT, valid from 1 June 2026): Võrk 2 6.07 / 3.51, Võrk 4 3.69 / 2.10.
+**Network package.** Pick Elektrilevi **Võrk 1, 2, 4 or 5**: their network prices are filled in from Elektrilevi's price list (valid from 1 June 2026, excl. VAT) and locked. Or pick **Custom** for another network operator or your own prices.
+
+| Package | Day | Night / weekend | Day peak | Weekend peak |
+|---|---|---|---|---|
+| Võrk 1 | 7.72 | 7.72 | – | – |
+| Võrk 2 | 6.07 | 3.51 | – | – |
+| Võrk 4 | 3.69 | 2.10 | – | – |
+| Võrk 5 | 5.29 | 3.03 | 8.18 | 4.74 |
+
+Peak rates apply November–March: the day peak on working days 09–12 and 16–20, the weekend peak on weekends and holidays 16–20. A Custom package uses peak hours only if you enter peak prices. Monthly network fees are fixed costs and aren't included. `FEE_NETWORK_PACKAGE` (`vork1`, `vork2`, `vork4`, `vork5` or `custom`) sets the default package.
+
+Defaults can be overridden with `FEE_MARGIN`, `FEE_TAASTUV`, `FEE_AKTSIIS`, `FEE_TASAKAAL`, `FEE_VARUSTUS`, `FEE_ELEKTRILEVI_DAY`, `FEE_ELEKTRILEVI_NIGHT`, `FEE_VAT`, `FEE_EXPORT_MARGIN` and `FEE_EXPORT_TASAKAAL`. One set of values applies to all history; rate changes over time aren't modelled. 
 
 The `?fees=on|off` and `?range=this_month` URL parameters open the dashboard with that setting.
 

@@ -292,10 +292,12 @@ button { font: inherit; }
   display: flex; align-items: center; gap: 10px; width: 100%; min-height: 36px; padding: 0;
   border: 0; background: transparent; color: var(--text); cursor: pointer; text-align: left;
 }
-.disclosure .tool-title { flex: 1; }
+.disclosure .tool-title { flex: none; white-space: nowrap; }
+.disclosure .muted { flex: 1; text-align: right; }
 .disclosure svg { transition: transform 0.15s ease; color: var(--muted); }
 
 .fee-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+.fee-grid .field { justify-content: space-between; }
 .fee-grid .field input { width: 100%; }
 .unit { color: var(--muted); font-size: 11px; }
 .btn-link {
@@ -307,3 +309,7 @@ button { font: inherit; }
 @media (max-width: 720px) {
   .switch { padding: 0 10px; }
 }
+
+.seg-sm { align-self: flex-start; }
+.seg-sm button { padding: 6px 10px; min-height: 32px; font-size: 13px; }
+.field input:disabled { background: var(--surface-2); color: var(--muted); opacity: 1; }

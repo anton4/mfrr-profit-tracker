@@ -96,10 +96,19 @@ function App() {
       })
       .catch((e) => console.error('Fee settings fetch failed', e));
   }, []);
+  const pickPackage = (id) => {
+    const rates = feeConfig?.packages?.[id]?.rates;
+    setFeeDraft((d) => ({
+      ...d,
+      network_package: id,
+      ...(rates ? Object.fromEntries(Object.entries(rates).map(([k, v]) => [k, String(v)])) : {}),
+    }));
+  };
   const saveFees = async (values) => {
     setFeeStatus(null);
     const payload = {};
     for (const [k, v] of Object.entries(values)) {
+      if (k === 'network_package') { payload[k] = v; continue; }
       const n = Number(String(v).replace(',', '.'));
       if (String(v).trim() === '' || Number.isNaN(n)) { setFeeStatus({ ok: false, text: `${feeConfig?.labels?.[k] ?? k}: not a number` }); return; }
       payload[k] = n;
@@ -714,20 +723,52 @@ function App() {
             <div className="tool">
               <button type="button" className="disclosure" aria-expanded={feesOpen} onClick={() => setFeesOpen(!feesOpen)}>
                 <span className="tool-title">Electricity fees</span>
-                <span className="muted small">{feesOn ? 'included in net' : 'not included'}</span>
+                <span className="muted small">
+                  {feeConfig ? `${feeConfig.packages[feeConfig.values.network_package]?.label ?? ''} · ` : ''}{feesOn ? 'included in net' : 'not included'}
+                </span>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ transform: feesOpen ? 'rotate(180deg)' : undefined }}><path d="m6 9 6 6 6-6" /></svg>
               </button>
               {feesOpen && feeConfig && (
                 <>
-                  <div className="fee-grid">
-                    {Object.keys(feeConfig.values).map((k) => (
+                  {(() => {
+                    const pkgId = feeDraft.network_package ?? feeConfig.values.network_package;
+                    const pkg = feeConfig.packages[pkgId];
+                    const isCustom = !pkg?.rates;
+                    const hasPeaks = isCustom || Number(feeDraft.elektrilevi_day_peak) > 0;
+                    const networkKeys = feeConfig.network_keys.filter((k) => hasPeaks || !k.endsWith('_peak'));
+                    const otherKeys = Object.keys(feeConfig.labels).filter((k) => !feeConfig.network_keys.includes(k));
+                    const field = (k, disabled = false) => (
                       <label key={k} className="field">
                         <span>{feeConfig.labels[k]} <span className="unit">{k === 'vat' ? '%' : feeConfig.unit}</span></span>
                         <input type="text" inputMode="decimal" value={feeDraft[k] ?? ''} placeholder={String(feeConfig.defaults[k])}
-                          onChange={(e) => setFeeDraft({ ...feeDraft, [k]: e.target.value })} />
+                          disabled={disabled} onChange={(e) => setFeeDraft({ ...feeDraft, [k]: e.target.value })} />
                       </label>
-                    ))}
-                  </div>
+                    );
+                    return (
+                      <>
+                        <div className="field">
+                          <span>Network package</span>
+                          <div className="seg seg-sm" role="group" aria-label="Network package">
+                            {Object.entries(feeConfig.packages).map(([id, p]) => (
+                              <button key={id} type="button" className={pkgId === id ? 'on' : ''} aria-pressed={pkgId === id} onClick={() => pickPackage(id)}>
+                                {id === 'custom' ? 'Custom' : p.label.replace('Elektrilevi ', '')}
+                              </button>
+                            ))}
+                          </div>
+                          <span className="small">{pkg?.label}{pkg?.note ? ` · ${pkg.note}` : ''}{!isCustom ? ' · price list from 1 June 2026' : ''}</span>
+                        </div>
+                        <div className="fee-grid">{networkKeys.map((k) => field(k, !isCustom))}</div>
+                        {hasPeaks && (
+                          <div className="muted small">
+                            Peak rates apply November–March: day peak on working days 09–12 and 16–20, weekend peak on weekends and holidays 16–20.
+                            {isCustom && ' Leave them at 0 if your package has no peak hours.'}
+                          </div>
+                        )}
+                        <div className="divider" />
+                        <div className="fee-grid">{otherKeys.map((k) => field(k))}</div>
+                      </>
+                    );
+                  })()}
                   <div className="tool-form">
                     <button type="button" className="btn" onClick={() => saveFees(feeDraft)}>Save fees</button>
                     <button type="button" className="btn-link" onClick={() => saveFees(feeConfig.defaults)}>Reset to defaults</button>
@@ -735,7 +776,8 @@ function App() {
                   {feeStatus && <div className={`small ${feeStatus.ok ? 'ok' : 'err'}`}>{feeStatus.text}</div>}
                   <div className="muted small">
                     Cents/kWh excl. VAT. Import = (spot + fees) × (1 + VAT); export = spot − export fees. Night/weekend network rate
-                    before 07:00, from 22:00, on weekends and Estonian public holidays. Turn on <strong>Fees</strong> in the header to use them.
+                    before 07:00, from 22:00, on weekends and Estonian public holidays. Monthly network fees are fixed costs and not included.
+                    Turn on <strong>Fees</strong> in the header to use them.
                   </div>
                 </>
               )}
@@ -864,7 +906,7 @@ function RowDetails({ entry, feesOn, hm, fmtNum, fmtEur }) {
     <div className="details">
       <div><div className="muted small">Grid</div><div className="num">{fmtNum(entry.grid_kwh)} kWh</div></div>
       <div><div className="muted small">Bill effect{feesOn ? ' (with fees)' : ''}</div><div className="num">{typeof gridCost === 'number' ? fmtEur(-gridCost) : '–'}</div></div>
-      <div><div className="muted small">Network rate</div><div>{entry.tariff_period === 'night' ? 'Night / weekend' : entry.tariff_period === 'day' ? 'Day' : '–'}</div></div>
+      <div><div className="muted small">Network rate</div><div>{{ day: 'Day', night: 'Night / weekend', day_peak: 'Day peak', holiday_peak: 'Weekend peak' }[entry.tariff_period] ?? '–'}</div></div>
       <div><div className="muted small">NPS</div><div className="num">{typeof entry.nordpool_price === 'number' ? `${(entry.nordpool_price * 1000).toFixed(2)} €/MWh` : '–'}</div></div>
       <div><div className="muted small">Baseline</div><div className="num">{typeof entry.baseline_w === 'number' ? `${Math.round(entry.baseline_w)} W` : '–'}</div></div>
       <div><div className="muted small">Start → end</div><div className="num">{hm(entry.start)} → {hm(entry.end)}</div></div>
