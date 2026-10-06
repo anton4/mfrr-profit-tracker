@@ -129,6 +129,9 @@ class Tracker:
         self.baseline = SignalBaseline(store=store_baseline)
         self.last_logged_signal = None
         self.run_market = None   # market of the current Kratt run
+        self.run_start = None
+        self.run_rows = {}       # slot key → ids of rows this run wrote in that slot
+        self.boundary = None     # quarter an mFRR run crossed: was the last minute a ramp?
 
     def tick(self, now: datetime, fetch=None, write=True, live=True, db: Database | None = None):
         """Process one 10 s tick at `now`.
@@ -156,21 +159,28 @@ class Tracker:
                 print(f"🔔 Signal became {signal} at {now.isoformat()}")
             self.last_logged_signal = signal
 
+        if self.boundary is not None and write:
+            self._resolve_boundary(now, active=signal is not None, db=db)
+
         if not signal:
-            self.run_market = None
+            self.run_market = self.run_start = None
+            self.run_rows = {}
             return
         if self.run_market is None:
-            run_start = get_source_changed(fetch) or now
-            self.run_market = classify_market(run_start.astimezone(tz))
+            self.run_start = (get_source_changed(fetch) or now).astimezone(tz)
+            self.run_market = classify_market(self.run_start)
             if live:
-                print(f"🏷️  Kratt run from {run_start.astimezone(tz).isoformat()} classified as {self.run_market}")
+                print(f"🏷️  Kratt run from {self.run_start.isoformat()} classified as {self.run_market}")
         if not write:
             return
         market = self.run_market
 
         # An mFRR activation starts one minute before its quarter; Kratt books that minute in
-        # the current slot but prices it with the next quarter's prices
+        # the current slot but prices it with the next quarter's prices. If the run then ends at
+        # the quarter instead of continuing, _resolve_boundary moves the minute back.
         ramp = market == "MFRR" and now.minute % 15 == 14
+        if ramp and self.run_start < now.replace(second=0, microsecond=0):
+            self.boundary = slot_end_time
         price_slot = (slot_end_time if ramp else timeslot).isoformat()
 
         net_kwh, seconds = reading if reading else (0.0, 0.0)
@@ -213,11 +223,14 @@ class Tracker:
         else:
             row["active_s"] = seconds or 10.0
         start_time = datetime.fromisoformat(row["start"])
+        # An mFRR slot's last minute belongs to the next quarter's activation (the ramp row),
+        # so a full mFRR slot ends a minute early; ramp rows are never backup/cancelled
+        full_until = slot_end_time - timedelta(seconds=11) - (timedelta(minutes=1) if market == "MFRR" else timedelta(0))
         row.update({
             "end": now.isoformat(),
             "duration_min": round(row["active_s"] / 60),
-            "cancelled": now < (slot_end_time - timedelta(seconds=11)),
-            "was_backup": (start_time - timeslot).total_seconds() >= 15,
+            "cancelled": not ramp and now < full_until,
+            "was_backup": not ramp and (start_time - timeslot).total_seconds() >= 15,
             "requested_kwh": (row.get("requested_kwh") or 0.0) + (requested_w or 0.0) * seconds / 3_600_000.0,
             "baseline_w": baseline_w,
         })
@@ -252,6 +265,50 @@ class Tracker:
                 db["slots"].update(row["id"], row, alter=True)
             else:
                 db["slots"].insert(row, pk="id", alter=True)
+            self.run_rows.setdefault(key, set()).add(row["id"])
+
+    # Seconds after a quarter within which an ending mFRR run counts as ending at the quarter
+    # (HA reports the end a few seconds late)
+    BOUNDARY_GRACE_S = 30
+
+    def _resolve_boundary(self, now: datetime, active: bool, db: Database):
+        """After an mFRR run crossed a quarter: if it continued, the last minute was a ramp into the
+        next activation (keep). If it ended at the quarter, Kratt counts that minute in its own
+        slot (merge the ramp rows back) and nothing after the quarter (drop the HA lag tail)."""
+        quarter = self.boundary
+        if active and (now - quarter).total_seconds() < self.BOUNDARY_GRACE_S:
+            return                        # not decided yet (also: still before the quarter)
+        self.boundary = None
+        if active:
+            return                        # continued into the next quarter: it was a ramp
+        prev_key = (quarter - SLOT).isoformat()
+        for ramp_id in [i for i in self.run_rows.get(prev_key, ()) if i.endswith("_r")]:
+            self._merge_ramp(db, ramp_id)
+        for tail_id in self.run_rows.get(quarter.isoformat(), ()):
+            db["slots"].delete_where("id = ?", [tail_id])
+
+    @staticmethod
+    def _merge_ramp(db: Database, ramp_id: str):
+        try:
+            ramp = dict(db["slots"].get(ramp_id))
+        except NotFoundError:
+            return
+        main_id = ramp_id[:-2]
+        sums = ("energy_kwh", "grid_kwh", "grid_import_kwh", "grid_export_kwh", "metered_s",
+                "baseline_import_kwh", "baseline_export_kwh", "requested_kwh", "active_s")
+        try:
+            main = dict(db["slots"].get(main_id))
+            for k in sums:
+                main[k] = round((main.get(k) or 0.0) + (ramp.get(k) or 0.0), 5)
+            main["end"] = max(main["end"], ramp["end"])
+        except NotFoundError:
+            main = {**ramp, "id": main_id}
+        main.update(price_timeslot=main["timeslot"], cancelled=False, profit=None, net_total=None,
+                    duration_min=round((main.get("active_s") or 0.0) / 60))
+        requested = main.get("requested_kwh") or 0.0
+        main["delivery_pct"] = round(main["energy_kwh"] / requested * 100.0, 1) if requested > 0 else None
+        db["slots"].upsert(main, pk="id", alter=True)
+        db["slots"].delete(ramp_id)
 
     def _nordpool_price(self, slot_start: datetime) -> float | None:
         """Nord Pool price (€/kWh) for a slot from the HA Nord Pool sensor's attributes."""

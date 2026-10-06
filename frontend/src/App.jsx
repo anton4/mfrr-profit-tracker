@@ -282,12 +282,15 @@ function App() {
 
     for (const entry of data) {
       const signal = entry.signal;
+      // An mFRR ramp minute (row id "…_r") is part of the next quarter's activation:
+      // its energy and money count, but it isn't a separate activation
+      const isRamp = Boolean(entry.id?.endsWith('_r'));
       const energy = entry.energy_kwh || 0;
       const gridEnergy = entry.grid_kwh || 0;
       const profit = entry.profit || 0;
       const duration = entry.duration || 0;
-      const isBackup = Boolean(entry.was_backup);
-      const isCancelled = Boolean(entry.cancelled);
+      const isBackup = !isRamp && Boolean(entry.was_backup);
+      const isCancelled = !isRamp && Boolean(entry.cancelled);
 
       const gridCost = entry.grid_cost || 0;
       const krattFee = entry.kratt_fee || 0;
@@ -317,7 +320,7 @@ function App() {
         bucket.grid_energy += gridEnergy;
         bucket.profit += profit;
         bucket.duration += duration;
-        bucket.count++;
+        if (!isRamp) bucket.count++;
         bucket.backup += isBackup ? 1 : 0;
         bucket.cancelled += isCancelled ? 1 : 0;
         bucket.grid += gridCost;
@@ -330,7 +333,7 @@ function App() {
         }
       }
 
-      acc.total.count++;
+      if (!isRamp) acc.total.count++;
     }
 
     return acc;
@@ -350,7 +353,17 @@ function App() {
     () => qwReport.reduce((acc, r) => ({ kwh: acc.kwh + (r.total_kwh || 0), share: acc.share + (r.share_eur || 0) }), { kwh: 0, share: 0 }),
     [qwReport],
   );
-  const officialShown = new Set();
+  // Show official figures on the main row of each (slot, direction): not a ramp row, most energy
+  const officialRowId = useMemo(() => {
+    const best = new Map();
+    for (const e of data) {
+      const key = `${e.timeslot}|${e.signal}`;
+      const rank = [e.id?.endsWith('_r') ? 0 : 1, e.energy_kwh || 0];
+      const cur = best.get(key);
+      if (!cur || rank[0] > cur.rank[0] || (rank[0] === cur.rank[0] && rank[1] > cur.rank[1])) best.set(key, { id: e.id, rank });
+    }
+    return new Map([...best].map(([k, v]) => [k, v.id]));
+  }, [data]);
 
   const formatVal = (val, digits = 2) => (val ? val.toFixed(digits) : '-');
   const percent = (count, total) => (total ? `${Math.round((count / total) * 100)}%` : '-');
@@ -667,8 +680,7 @@ function App() {
               {(() => {
                 const key = `${entry.timeslot}|${entry.signal}`;
                 const o = official.get(key);
-                if (!o || officialShown.has(key)) return (<><td data-label="Kratt kWh">-</td><td data-label="Kratt €">-</td></>);
-                officialShown.add(key);
+                if (!o || officialRowId.get(key) !== entry.id) return (<><td data-label="Kratt kWh">-</td><td data-label="Kratt €">-</td></>);
                 return (
                   <>
                     <td data-label="Kratt kWh">{typeof o.kwh === 'number' ? o.kwh.toFixed(2) : '-'}</td>
