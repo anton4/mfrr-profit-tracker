@@ -59,54 +59,45 @@ def run_profit_calculation():
         # Your share of activation revenue after Kratt
         your_share = (1.0 - KRATT_SHARE)
 
-        update = {}
-
         if direction == "DOWN":
-            # Commanded DOWN: you increase grid import.
-            # Activation revenue is (nps - mffr) * energy (you absorb, so compare against nps).
-            # Grid cost is applied on imported grid energy with multiplier.
+            # Commanded DOWN: you increase grid import (or reduce export).
+            # Activation revenue is (nps - mffr) * energy: compensation for the energy you absorb.
             activation_income = (nps_price - mffr_eur_per_kwh) * energy_kwh * your_share
-            kratt_fee         = activation_income * (KRATT_SHARE / your_share) if your_share > 0 else 0.0
-
-            grid_import_kwh   = grid_import
-            grid_cost         = nps_price * GRID_IMPORT_MULT * grid_import_kwh
-
-            net_total         = activation_income - grid_cost
-            price_per_kwh     = (net_total / grid_import_kwh) if grid_import_kwh > 0 else None
-
-            update.update({
-                "profit":       round(activation_income, 5),    # legacy "profit" = activation share
-                "kratt_fee":    round(kratt_fee, 5),
-                "grid_cost":    round(grid_cost, 5),
-                "net_total":    round(net_total, 5),
-                "price_per_kwh": round(price_per_kwh, 5) if price_per_kwh is not None else None,
-            })
-
         elif direction == "UP":
-            # Commanded UP: you increase grid export.
-            # Activation revenue is (mffr - nps) * energy (you deliver against nps).
+            # Commanded UP: you increase grid export (or reduce import).
+            # Activation revenue is (mffr - nps) * energy: on top of the nps you get for that energy.
             activation_income = (mffr_eur_per_kwh - nps_price) * energy_kwh * your_share
-            kratt_fee         = activation_income * (KRATT_SHARE / your_share) if your_share > 0 else 0.0
-
-            # Export income component: nps * exported energy
-            grid_export_kwh   = grid_export
-            export_income     = nps_price * grid_export_kwh
-
-            net_total         = activation_income + export_income
-            price_per_kwh     = (net_total / energy_kwh) if energy_kwh > 0 else None
-
-            # Keep legacy "grid_cost" column but put signed grid value there (was in your code)
-            update.update({
-                "profit":        round(activation_income, 5),
-                "kratt_fee":     round(kratt_fee, 5),
-                "grid_cost":     round(-export_income, 5),  # legacy name kept; negative cost = income
-                "net_total":     round(net_total, 5),
-                "price_per_kwh": round(price_per_kwh, 5) if price_per_kwh is not None else None,
-            })
-
         else:
             # Unknown direction
             continue
+        kratt_fee = activation_income * (KRATT_SHARE / your_share) if your_share > 0 else 0.0
+
+        baseline_import = row.get("baseline_import_kwh")
+        baseline_export = row.get("baseline_export_kwh")
+        if baseline_import is not None and baseline_export is not None:
+            # Electricity bill effect of the activation only: metered import/export vs. what the
+            # baseline would have imported/exported over the same time. Import costs nps * VAT
+            # multiplier, export earns nps.
+            extra_import = grid_import - baseline_import
+            extra_export = grid_export - baseline_export
+            bill_effect = extra_export * nps_price - extra_import * nps_price * GRID_IMPORT_MULT
+        elif direction == "DOWN":
+            # Legacy rows: all import in the slot
+            bill_effect = -nps_price * GRID_IMPORT_MULT * grid_import
+        else:
+            # Legacy rows: all export in the slot
+            bill_effect = nps_price * grid_export
+
+        net_total     = activation_income + bill_effect
+        price_per_kwh = (net_total / energy_kwh) if energy_kwh > 0 else None
+
+        update = {
+            "profit":        round(activation_income, 5),   # activation share after Kratt's fee
+            "kratt_fee":     round(kratt_fee, 5),
+            "grid_cost":     round(-bill_effect, 5),        # negative cost = income
+            "net_total":     round(net_total, 5),
+            "price_per_kwh": round(price_per_kwh, 5) if price_per_kwh is not None else None,
+        }
 
         if update:
             db["slots"].update(row["timeslot"], update, alter=True)

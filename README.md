@@ -66,21 +66,39 @@ Every 10 seconds the tracker reads all phase powers and sums them into **net gri
 
 -   Longer gaps where the power changed are skipped, because it's unknown when the change happened.
 
-`baseline.py` averages the net grid power over each 15-minute slot that had no mFRR command. That average is the baseline. A slot only counts if readings covered at least 12 minutes of it.
+**Baseline.** Qilowatt describes the KratTrade (Kratt) baseline as *"your system's current state — how much energy you are currently exporting or importing from the grid"*, and says that you earn from the change relative to it, measured on the grid side ([Qilowatt flexibility market](https://qilowatt.eu/en/flexibility-market/)). The tracker therefore:
 
--   The baseline is locked for the whole run of back-to-back commands. A new baseline is only taken after a full idle 15-minute slot.
+-   Takes the baseline as the average net grid power over the **60 s of idle readings just before the signal** was detected. Readings after the signal are excluded, so the battery's own response doesn't leak into the baseline.
 
--   Delivered mFRR energy is the slot's metered net grid energy vs. the baseline over the same metered time. Only deviation in the commanded direction counts:
+-   Keeps the baseline **locked for the whole run**, i.e. while `qw_source` stays `Kratt`, including direction or power-limit changes. The next signal after the run ends takes a new snapshot.
+
+-   Falls back to 0 W, and logs it, when there's no idle data before the signal, e.g. right after startup.
+
+**Delivered mFRR energy** is the slot's metered net grid energy compared with the baseline energy over the same metered time. The baseline energy is added up reading by reading, so two runs in one slot each keep their own baseline. Only deviation in the commanded direction counts:
 
 ```
-baseline_kWh = baseline_W × metered_time
-DOWN: mFRR energy = max(0, net_grid_kWh − baseline_kWh)   # extra import
+DOWN: mFRR energy = max(0, net_grid_kWh − baseline_kWh)   # extra import / less export
 UP:   mFRR energy = max(0, baseline_kWh − net_grid_kWh)   # extra export / less import
 ```
 
 -   Requested energy is `qw_powerlimit` integrated over the same metered time (`requested_kwh`). **Delivery %** = delivered mFRR energy / requested energy, a rough measure of how well the battery followed the command.
 
--   Grid import and export are also stored separately per slot (`grid_import_kwh`, `grid_export_kwh`). Profit uses them for the DOWN import cost and the UP export income.
+-   Grid import and export are stored separately per slot (`grid_import_kwh`, `grid_export_kwh`), along with what the baseline would have imported and exported over the same time (`baseline_import_kwh`, `baseline_export_kwh`).
+
+**Profit** (`profit_calc.py`):
+
+```
+activation = (mFRR − NPS) × mFRR energy × (1 − KRATT_SHARE)    # UP
+activation = (NPS − mFRR) × mFRR energy × (1 − KRATT_SHARE)    # DOWN
+bill effect = (export − baseline export) × NPS − (import − baseline import) × NPS × GRID_IMPORT_MULT
+net = activation + bill effect
+```
+
+Only the change against the baseline counts toward the bill effect. Normal household consumption and PV export that would have happened anyway aren't attributed to mFRR. `GRID_IMPORT_MULT` (default 1.24) adds VAT on imported energy. Network fees are not included.
+
+The activation formulas follow community knowledge of Fusebox settlement. Kratt hasn't published its exact settlement formula, so treat the numbers as estimates.
+
+The value of the energy stored in or taken from the battery isn't counted. DOWN therefore looks worse than it is, because you get stored energy for later use. UP looks better than it is, because you spent stored energy.
 
 * * * * *
 
@@ -102,7 +120,7 @@ Set `MFRR_PRICE_AREA` (`Estonia` / `Latvia` / `Lithuania`) to use another biddin
 
 -   backend/main.py: Polls Home Assistant every 10 seconds and writes mFRR slot data to the database.
 
--   backend/baseline.py: Tracks average grid power during idle slots.
+-   backend/baseline.py: Takes and locks the baseline (grid state just before a Kratt signal).
 
 -   backend/mffr_price_updater.py: Fills in missing mFRR prices.
 

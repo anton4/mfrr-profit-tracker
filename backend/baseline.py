@@ -1,122 +1,80 @@
 # backend/baseline.py
-# Tracks average net grid power (Kratt meters at the grid connection point) during idle slots,
-# integrated from the phase power sensors.
+# Kratt (KratTrade) baseline: the grid-side state at the moment the signal arrives —
+# "how much energy you are currently exporting or importing from the grid" (Qilowatt).
+# It is taken from the idle readings just before the signal and stays locked for the whole run.
+from collections import deque
 from datetime import datetime
 import pytz
-from apscheduler.schedulers.background import BackgroundScheduler
 from sqlite_utils import Database
-
-from ha import GridMeter, get_signal
 
 DB_PATH = "data/mffr.db"
 tz = pytz.timezone("Europe/Tallinn")
 
+# Idle readings averaged into the snapshot (smooths sensor noise; ~6 reads at 10 s)
+BASELINE_WINDOW_S = 60
+
+
 def dlog(msg: str):
     print(f"[baseline] {datetime.now(tz).isoformat()}  {msg}")
 
-def _open_db() -> Database:
-    db = Database(DB_PATH)
-    try:
-        db.conn.execute("PRAGMA journal_mode=WAL;")
-        db.conn.execute("PRAGMA synchronous=NORMAL;")
-        db.conn.execute("PRAGMA busy_timeout=5000;")
-    except Exception:
-        pass
-    return db
 
 def _ensure_schema():
-    db = _open_db()
-    try:
-        db["baseline_state"].create({
-            "key": str,
-            "baseline_w": float,
-            "computed_for_slot": str,
-            "energy_Wh": float,
-            "updated_at": str
-        }, pk="key", if_not_exists=True)
-    finally:
-        try:
-            db.conn.close()
-        except Exception:
-            pass
+    db = Database(DB_PATH)
+    db["baseline_state"].create({
+        "key": str,
+        "baseline_w": float,
+        "locked_at": str,
+        "window_s": float,
+    }, pk="key", if_not_exists=True)
 
 _ensure_schema()
 
-def reset_baseline_table():
-    try:
-        db = Database(DB_PATH)
-        db["baseline_state"].delete_where("1=1")
-        db.conn.commit()
-        print("🧹 Cleared baseline_state on startup")
-    except Exception as e:
-        print(f"❌ Failed to clear baseline_state: {e}")
 
-reset_baseline_table()
+class SignalBaseline:
+    """Grid power just before a Kratt signal, locked while the run lasts.
 
-# A slot only yields a baseline if the meter covered most of it (e.g. not right after startup)
-MIN_COVERAGE_S = 720
+    A run is an uninterrupted period with an active signal; direction or power-limit changes
+    within it keep the baseline, since a new snapshot would include the battery's own response.
+    """
 
-meter = GridMeter()
-accum_Wh = 0.0
-accum_s = 0.0
-saw_mffr = False
-current_slot = None
+    def __init__(self):
+        self._idle = deque()       # (time, net_kwh, seconds) of recent idle readings
+        self.baseline_w = None     # locked value while a run is active
 
-def _slot_anchor(dt: datetime):
-    return dt.replace(minute=(dt.minute // 15) * 15, second=0, microsecond=0)
+    def on_tick(self, now: datetime, reading, active: bool) -> float | None:
+        """Feed every tick's meter reading. Returns the locked baseline (W) while active."""
+        if not active:
+            self.baseline_w = None
+            if reading:
+                self._idle.append((now, *reading))
+        # Keep only readings that ended within the window before now
+        while self._idle and (now - self._idle[0][0]).total_seconds() >= BASELINE_WINDOW_S:
+            self._idle.popleft()
+        if not active:
+            return None
 
-def tick():
-    global accum_Wh, accum_s, saw_mffr, current_slot
-    now = datetime.now(tz)
-    slot = _slot_anchor(now)
+        if self.baseline_w is None:
+            energy_kwh = sum(r[1] for r in self._idle)
+            seconds = sum(r[2] for r in self._idle)
+            self.baseline_w = round(energy_kwh * 3_600_000.0 / seconds, 1) if seconds > 0 else 0.0
+            if seconds > 0:
+                dlog(f"Locked baseline {self.baseline_w} W from {seconds:.0f} s before the signal")
+            else:
+                dlog("No idle readings before the signal — baseline 0 W")
+            self._store(now, seconds)
+            self._idle.clear()
+        return self.baseline_w
 
-    if current_slot is None:
-        current_slot = slot
-
-    if slot > current_slot:
-        if accum_s >= MIN_COVERAGE_S and not saw_mffr:
-            avg_w = round((accum_Wh * 3600.0) / accum_s, 2)
-            try:
-                db = _open_db()
-                with db.conn:
-                    db["baseline_state"].upsert({
-                        "key": "latest",
-                        "baseline_w": avg_w,
-                        "computed_for_slot": current_slot.isoformat(),
-                        "energy_Wh": round(accum_Wh, 3),
-                        "updated_at": now.isoformat()
-                    }, pk="key")
-                dlog(f"Updated baseline: {avg_w} W (slot {current_slot.isoformat()}, energy {accum_Wh:.3f} Wh)")
-            except Exception:
-                pass
-            finally:
-                try:
-                    db.conn.close()
-                except Exception:
-                    pass
-
-        current_slot = slot
-        accum_Wh = 0.0
-        accum_s = 0.0
-        saw_mffr = False
-
-    reading = meter.read(now, slot_start=slot)
-
-    sig = get_signal()
-    if sig and not saw_mffr:
-        saw_mffr = True
-
-    if reading:
-        net_kwh, seconds = reading
-        accum_Wh += net_kwh * 1000.0
-        accum_s += seconds
-
-scheduler = BackgroundScheduler()
-scheduler.add_job(tick, "interval", seconds=10, max_instances=1, coalesce=True)
-
-if __name__ == "__main__":
-    print("▶️ baseline service started")
-    scheduler.start()
-    import time
-    while True:
-        time.sleep(3600)
+    def _store(self, now: datetime, seconds: float):
+        try:
+            db = Database(DB_PATH)
+            db.conn.execute("PRAGMA busy_timeout=5000;")
+            with db.conn:
+                db["baseline_state"].upsert({
+                    "key": "latest",
+                    "baseline_w": self.baseline_w,
+                    "locked_at": now.isoformat(),
+                    "window_s": seconds,
+                }, pk="key", alter=True)
+        except Exception as e:
+            dlog(f"Failed to store baseline: {e}")

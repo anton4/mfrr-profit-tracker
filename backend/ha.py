@@ -131,10 +131,9 @@ def get_signal() -> str | None:
     return None
 
 
-def mffr_energy_kwh(signal: str, net_kwh: float, seconds: float, baseline_w: float) -> float:
+def mffr_energy_kwh(signal: str, net_kwh: float, baseline_kwh: float) -> float:
     """Kratt meters at the grid connection point: delivered energy is the metered net grid energy
-    vs. the baseline over the same time, counted only in the commanded direction."""
-    baseline_kwh = baseline_w / 1000.0 * seconds / 3600.0
+    vs. the baseline energy over the same time, counted only in the commanded direction."""
     if signal == "DOWN":
         return max(0.0, net_kwh - baseline_kwh)   # extra import
     if signal == "UP":
