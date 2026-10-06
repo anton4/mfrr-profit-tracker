@@ -6,7 +6,7 @@ import pytz
 from sqlite_utils import Database
 from sqlite_utils.db import NotFoundError
 
-from ha import SENSOR_GRID, SENSOR_NORDPOOL, get_entity, get_float, get_signal, mffr_power_w
+from ha import SENSOR_NORDPOOL, GridMeter, get_entity, get_signal, mffr_energy_kwh
 
 DB_PATH = "data/mffr.db"
 tz = pytz.timezone("Europe/Tallinn")
@@ -47,8 +47,11 @@ required_columns = {
     "kratt_fee": float,
     "net_total": float,
     "price_per_kwh": float,
-    "grid_kwh": float,     # legacy safety
-    "baseline_w": float    # snapshot of baseline per slot
+    "grid_kwh": float,         # net grid energy (+import / -export)
+    "grid_import_kwh": float,  # import part, netted across phases per read
+    "grid_export_kwh": float,  # export part, netted across phases per read
+    "metered_s": float,        # seconds covered by meter reads (for baseline energy)
+    "baseline_w": float        # snapshot of baseline per slot
 }
 for column, col_type in required_columns.items():
     if column not in init_db["slots"].columns_dict:
@@ -59,6 +62,7 @@ init_db["slots"].create_index(["timeslot"], if_not_exists=True)
 init_db["slots"].create_index(["duration_min", "end"], if_not_exists=True)
 
 last_logged_signal = None
+grid_meter = GridMeter()
 
 def _with_busy_timeout(db: Database, ms: int = 5000):
     try:
@@ -101,6 +105,8 @@ def write_current_timeslot():
     key = timeslot.isoformat()
     slot_end_time = timeslot + timedelta(minutes=15)
 
+    # Read the counters every tick so the next delta only covers the last ~10 s
+    reading = grid_meter.read(now)
     signal = get_signal()
 
     if signal != last_logged_signal:
@@ -130,16 +136,21 @@ def write_current_timeslot():
     if baseline_w is None:
         baseline_w = get_latest_baseline_w()
 
-    # Kratt meters at the grid connection point
-    grid_power_w = get_float(SENSOR_GRID)
-    if grid_power_w is None:
-        grid_power_w = 0.0
-        power_w = 0.0
-    else:
-        power_w = mffr_power_w(signal, grid_power_w, baseline_w)
+    # Grid energy since the previous tick, from the cumulative meter counters
+    net_kwh, seconds = reading if reading else (0.0, 0.0)
 
-    energy_kwh = round((power_w / 1000.0) * (10.0 / 3600.0), 5)
-    grid_kwh = round((grid_power_w / 1000.0) * (10.0 / 3600.0), 5)
+    def totals(prev: dict | None) -> dict:
+        """Add this tick to the slot totals; mFRR energy is evaluated over the whole slot."""
+        prev = prev or {}
+        grid_kwh = (prev.get("grid_kwh") or 0.0) + net_kwh
+        metered_s = (prev.get("metered_s") or 0.0) + seconds
+        return {
+            "grid_kwh": round(grid_kwh, 5),
+            "grid_import_kwh": round((prev.get("grid_import_kwh") or 0.0) + max(0.0, net_kwh), 5),
+            "grid_export_kwh": round((prev.get("grid_export_kwh") or 0.0) + max(0.0, -net_kwh), 5),
+            "metered_s": round(metered_s, 1),
+            "energy_kwh": round(mffr_energy_kwh(signal, grid_kwh, metered_s, baseline_w), 5),
+        }
 
     if row and row["signal"] == signal:
         end_time = datetime.fromisoformat(row["end"])
@@ -151,8 +162,7 @@ def write_current_timeslot():
 
             update_data = {
                 "timeslot": key,
-                "energy_kwh": round((row["energy_kwh"] or 0) + energy_kwh, 5),
-                "grid_kwh": round((row.get("grid_kwh", 0.0) or 0) + grid_kwh, 5),
+                **totals(row),
                 "end": now.isoformat(),
                 "duration_min": duration,
                 "cancelled": cancelled,
@@ -181,8 +191,7 @@ def write_current_timeslot():
             "start": now.isoformat(),
             "end": now.isoformat(),
             "signal": signal,
-            "energy_kwh": energy_kwh,
-            "grid_kwh": grid_kwh,
+            **totals(None),
             "mffr_price": None,
             "nordpool_price": None,
             "profit": None,

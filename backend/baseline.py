@@ -1,11 +1,12 @@
 # backend/baseline.py
-# Tracks average grid power (Kratt meters at the grid connection point) during idle slots.
+# Tracks average net grid power (Kratt meters at the grid connection point) during idle slots,
+# from the cumulative import/export energy counters.
 from datetime import datetime
 import pytz
 from apscheduler.schedulers.background import BackgroundScheduler
 from sqlite_utils import Database
 
-from ha import SENSOR_GRID, get_float, get_signal
+from ha import GridMeter, get_signal
 
 DB_PATH = "data/mffr.db"
 tz = pytz.timezone("Europe/Tallinn")
@@ -52,9 +53,12 @@ def reset_baseline_table():
 
 reset_baseline_table()
 
-_prev_t = None
-_prev_p = None
+# A slot only yields a baseline if the meter covered most of it (e.g. not right after startup)
+MIN_COVERAGE_S = 720
+
+meter = GridMeter()
 accum_Wh = 0.0
+accum_s = 0.0
 saw_mffr = False
 current_slot = None
 
@@ -62,7 +66,7 @@ def _slot_anchor(dt: datetime):
     return dt.replace(minute=(dt.minute // 15) * 15, second=0, microsecond=0)
 
 def tick():
-    global _prev_t, _prev_p, accum_Wh, saw_mffr, current_slot
+    global accum_Wh, accum_s, saw_mffr, current_slot
     now = datetime.now(tz)
     slot = _slot_anchor(now)
 
@@ -70,9 +74,8 @@ def tick():
         current_slot = slot
 
     if slot > current_slot:
-        EPS = 1e-6
-        if abs(accum_Wh) > EPS and not saw_mffr:
-            avg_w = round((accum_Wh * 3600.0) / 900.0, 2)
+        if accum_s >= MIN_COVERAGE_S and not saw_mffr:
+            avg_w = round((accum_Wh * 3600.0) / accum_s, 2)
             try:
                 db = _open_db()
                 with db.conn:
@@ -93,25 +96,20 @@ def tick():
                     pass
 
         current_slot = slot
-        _prev_t = None
-        _prev_p = None
         accum_Wh = 0.0
+        accum_s = 0.0
         saw_mffr = False
 
-    p = get_float(SENSOR_GRID)
+    reading = meter.read(now)
 
     sig = get_signal()
     if sig and not saw_mffr:
         saw_mffr = True
 
-    if p is not None:
-        if _prev_t is not None and _prev_p is not None:
-            dt_s = (now - _prev_t).total_seconds()
-            if dt_s > 0:
-                dE = (_prev_p * dt_s) / 3600.0
-                accum_Wh += dE
-        _prev_t = now
-        _prev_p = p
+    if reading:
+        net_kwh, seconds = reading
+        accum_Wh += net_kwh * 1000.0
+        accum_s += seconds
 
 scheduler = BackgroundScheduler()
 scheduler.add_job(tick, "interval", seconds=10, max_instances=1, coalesce=True)
