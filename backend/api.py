@@ -87,13 +87,8 @@ def get_mffr_data(
 
 @app.get("/api/price-sync")
 def get_price_sync():
-    """Status of the mFRR price sync from the Baltic Transparency Dashboard."""
-    job = mffr_price_updater.scheduler.get_job("mffr_prices")
-    next_run = job.next_run_time if job else None
-    return {
-        **mffr_price_updater.sync_status,
-        "next_sync_at": next_run.astimezone(LOCAL_TZ).isoformat() if next_run else None,
-    }
+    """Status of the mFRR price sync from the Baltic Transparency Dashboard (on demand)."""
+    return mffr_price_updater.sync_status
 
 @app.get("/api/backfill")
 def get_backfill_status():
