@@ -109,7 +109,7 @@ The value of the energy stored in or taken from the battery isn't counted. DOWN 
 
 Set `MFRR_PRICE_AREA` (`Estonia` / `Latvia` / `Lithuania`) to use another bidding zone.
 
-The sync runs every minute and always checks the last 3 hours, so the latest published price is known even when no slot is waiting. The UI shows the last sync (and any error), the next sync, and the newest slot with published prices. The same information is available at `/api/price-sync`.
+The sync is on demand. The dashboard is only queried when a **finished** slot is missing its mFRR price, and then at most every 5 minutes until the price is published (`MFRR_PRICE_RECHECK_MIN`). Without recent mFRR commands, no requests are made. The UI shows the last sync (and any error), the next sync ("not needed" when nothing is waiting), and the newest slot with published prices seen in the last sync. The same information is available at `/api/price-sync`.
 
 * * * * *
 

@@ -15,8 +15,10 @@ scheduler = BackgroundScheduler()
 BTD_URL = "https://api-baltic.transparency-dashboard.eu/api/v1/export"
 PRICE_AREA = os.getenv("MFRR_PRICE_AREA", "Estonia")
 MAX_LOOKBACK = timedelta(days=7)
-# Always look this far back, so the latest published price is known even with nothing pending
-STATUS_LOOKBACK = timedelta(hours=3)
+SLOT = timedelta(minutes=15)
+# The dashboard is only queried when a finished slot is missing its price, and then at most
+# this often (prices are published with a delay of about 1–3 h)
+RECHECK = timedelta(minutes=float(os.getenv("MFRR_PRICE_RECHECK_MIN", "5")))
 
 # Last sync result, served by /api/price-sync
 sync_status = {
@@ -28,7 +30,8 @@ sync_status = {
     "latest_price_slot": None,    # start of the newest slot with a published price
     "latest_up_price": None,      # €/MWh
     "latest_down_price": None,    # €/MWh
-    "pending_slots": 0,           # recorded slots still waiting for a price
+    "pending_slots": 0,           # finished slots still waiting for a price
+    "next_sync_at": None,         # None = no sync needed until a finished slot lacks a price
 }
 
 # Ensure log folder exists
@@ -103,23 +106,32 @@ def fetch_and_update_mffr_prices():
     now = datetime.now(tz)
     pending = []
     if "slots" in db.table_names():
-        pending = list(db["slots"].rows_where(
+        rows = db["slots"].rows_where(
             "mffr_price IS NULL AND timeslot >= ?",
             [(now - MAX_LOOKBACK).isoformat()],
             order_by="timeslot",
-        ))
+        )
+        # A running slot can't have a published price yet
+        pending = [r for r in rows if datetime.fromisoformat(r["timeslot"]) + SLOT <= now]
+    sync_status["pending_slots"] = len(pending)
 
-    window_start = now - STATUS_LOOKBACK
-    if pending:
-        window_start = min(window_start, datetime.fromisoformat(pending[0]["timeslot"]))
+    # Only query the dashboard when a finished slot needs a price, and not more often than RECHECK
+    if not pending:
+        sync_status["next_sync_at"] = None
+        return
+    last = sync_status["last_sync_at"]
+    if last and now - datetime.fromisoformat(last) < RECHECK:
+        sync_status["next_sync_at"] = (datetime.fromisoformat(last) + RECHECK).isoformat()
+        return
 
+    window_start = datetime.fromisoformat(pending[0]["timeslot"])
     sync_status["last_sync_at"] = now.isoformat()
+    sync_status["next_sync_at"] = (now + RECHECK).isoformat()
     try:
         api_data = fetch_btd_prices(window_start, now)
     except Exception as e:
         msg = f"❌ Failed to fetch mFRR prices: {e}"
         sync_status["last_error"] = str(e)
-        sync_status["pending_slots"] = len(pending)
         print(msg)
         log_error(msg)
         return
@@ -136,6 +148,8 @@ def fetch_and_update_mffr_prices():
     updated = apply_mffr_prices(db, pending, api_data)
 
     sync_status["pending_slots"] = len(pending) - updated
+    if not sync_status["pending_slots"]:
+        sync_status["next_sync_at"] = None
     if updated:
         print(f"✅ Updated {updated} mFRR prices in SQLite DB.")
         print(f"⏱️ Completed in {time.time() - start_time:.2f} seconds.")

@@ -344,12 +344,18 @@ function App() {
         >
           <strong>mFRR prices · {priceSync.source} ({priceSync.area})</strong>
           <span>
-            Last sync: {fmtTime(priceSync.last_sync_at)} {fmtAgo(priceSync.last_sync_at)}{' '}
+            Last sync: {priceSync.last_sync_at ? `${fmtTime(priceSync.last_sync_at)} ${fmtAgo(priceSync.last_sync_at)}` : 'never'}{' '}
             {priceSync.last_sync_at && (priceSync.last_error ? <span style={{ color: '#d33' }}>✗ failed</span> : <span style={{ color: 'green' }}>✓</span>)}
           </span>
-          <span>Next sync: {fmtTime(priceSync.next_sync_at)} {fmtIn(priceSync.next_sync_at)}</span>
+          <span title="The dashboard is only queried when a finished mFRR slot is missing its price">
+            Next sync:{' '}
+            {priceSync.next_sync_at
+              ? `${fmtTime(priceSync.next_sync_at)} ${fmtIn(priceSync.next_sync_at)}`
+              : 'not needed (no slots waiting for a price)'}
+          </span>
           <span>
-            Latest price data: {fmtSlot(priceSync.latest_price_slot)} {fmtAgo(priceSync.latest_price_slot)}
+            Latest price data:{' '}
+            {priceSync.latest_price_slot ? `${fmtSlot(priceSync.latest_price_slot)} ${fmtAgo(priceSync.latest_price_slot)}` : '-'}
             {priceSync.latest_price_slot && (
               <> · UP {priceSync.latest_up_price ?? '-'} / DOWN {priceSync.latest_down_price ?? '-'} €/MWh</>
             )}
