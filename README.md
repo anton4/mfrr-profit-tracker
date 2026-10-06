@@ -33,6 +33,7 @@ HA_URL=http://your-ha.local:8123
 HA_TOKEN=your_long_token_here
 SENSOR_SOURCE=sensor.qw_source
 SENSOR_MODE=sensor.qw_mode
+SENSOR_POWERLIMIT=sensor.qw_powerlimit
 SENSOR_GRID_IMPORT=sensor.shellyem3_485519dbeee9_channel_a_energy,sensor.shellyem3_485519dbeee9_channel_b_energy,sensor.shellyem3_485519dbeee9_channel_c_energy
 SENSOR_GRID_EXPORT=sensor.shellyem3_485519dbeee9_channel_a_energy_returned,sensor.shellyem3_485519dbeee9_channel_b_energy_returned,sensor.shellyem3_485519dbeee9_channel_c_energy_returned
 SENSOR_NORDPOOL=sensor.nordpool_kwh_ee_eur_3_10_0
@@ -41,9 +42,11 @@ KRATT_SHARE=0.20
 
 #### **Home Assistant Sensor Notes:**
 
--   SENSOR_SOURCE: Qilowatt source sensor. An mFRR command is active while its state is **`kratt`** (case-insensitive).
+-   SENSOR_SOURCE: Qilowatt source sensor. An mFRR command is active while its state is **`Kratt`** (case-insensitive).
 
--   SENSOR_MODE: Qilowatt mode/command sensor that gives the direction. **`BUY`** = DOWN, **`SELL`** / **`FRRUP`** = UP.
+-   SENSOR_MODE: Qilowatt mode sensor that gives the direction. **`frrdown`** = DOWN, **`frrup`** = UP.
+
+-   SENSOR_POWERLIMIT (optional): Qilowatt power limit sensor, the power Kratt requested (W or kW). Used to record requested energy and delivery % per slot.
 
 -   SENSOR_GRID_IMPORT / SENSOR_GRID_EXPORT: Cumulative grid **energy** counters (Wh, kWh or MWh, read from `unit_of_measurement`), comma-separated. These are typically one per phase, e.g. Shelly 3EM `channel_a/b/c_energy` for import and `channel_a/b/c_energy_returned` for export. Kratt measures at the grid connection point, so these counters are used for the baseline, the delivered mFRR energy and the grid import/export.
 
@@ -69,6 +72,8 @@ baseline_kWh = baseline_W × metered_time
 DOWN: mFRR energy = max(0, net_grid_kWh − baseline_kWh)   # extra import
 UP:   mFRR energy = max(0, baseline_kWh − net_grid_kWh)   # extra export / less import
 ```
+
+-   Requested energy is `qw_powerlimit` integrated over the same metered time (`requested_kwh`). **Delivery %** = delivered mFRR energy / requested energy, a rough measure of how well the battery followed the command.
 
 -   Grid import and export are also stored separately per slot (`grid_import_kwh`, `grid_export_kwh`). Profit uses them for the DOWN import cost and the UP export income.
 
