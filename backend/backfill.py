@@ -102,11 +102,29 @@ def run_backfill(start: datetime, end: datetime, progress=lambda phase, pct: Non
     progress("pricing", 90)
     rows = _rows_in_range(db, start, end)
     if rows:
-        mffr_price_updater.apply_mffr_prices(db, rows, mffr_price_updater.fetch_btd_prices(start, end))
-        nps = fetch_nps_prices(start - timedelta(hours=1), end)
+        # mFRR from the Baltic Transparency Dashboard (ramp minutes use the next quarter: +15 min)
+        mfrr_rows = [r for r in rows if (r.get("market") or "MFRR") == "MFRR"]
+        if mfrr_rows:
+            btd = mffr_price_updater.fetch_btd_prices(start, end + timedelta(minutes=15))
+            mffr_price_updater.apply_mffr_prices(db, mfrr_rows, btd)
+        # aFRR: Volton clearing price where published, else the estimate set by the tracker
+        afrr_rows = [r for r in rows if r.get("market") == "AFRR"]
+        if afrr_rows:
+            try:
+                volton = mffr_price_updater.fetch_volton_afrr_prices()
+            except Exception as e:
+                print(f"⚠️ Volton aFRR prices unavailable: {e}")
+                volton = {}
+            for r in afrr_rows:
+                slot = datetime.fromisoformat(r.get("price_timeslot") or r["timeslot"]).astimezone(timezone.utc)
+                price = volton.get((slot, r["signal"]))
+                if price is not None:
+                    db["slots"].update(r["id"], {"mffr_price": price, "price_source": "volton"})
+        nps = fetch_nps_prices(start - timedelta(hours=1), end + timedelta(minutes=15))
         nps_times = [p[0] for p in nps]
         for row in rows:
-            i = bisect_right(nps_times, datetime.fromisoformat(row["timeslot"])) - 1
+            slot = datetime.fromisoformat(row.get("price_timeslot") or row["timeslot"])
+            i = bisect_right(nps_times, slot) - 1
             if i >= 0:   # hourly (older) or 15-min prices: last price at or before the slot start
                 db["slots"].update(row["id"], {"nordpool_price": round(nps[i][1], 5)})
         profit_calc.run_profit_calculation()

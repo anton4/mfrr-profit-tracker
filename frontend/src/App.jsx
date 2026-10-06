@@ -29,6 +29,26 @@ function App() {
     return { from: toLocalInput(new Date(to.getTime() - 24 * 3600000)), to: toLocalInput(to) };
   });
   const [backfill, setBackfill] = useState(null);
+  const [qwReport, setQwReport] = useState([]);
+  const [qwImport, setQwImport] = useState(null);
+
+  // Import Qilowatt (KratTrade) CSV reports: each file is posted as the raw request body
+  const importQwReports = async (files) => {
+    const results = [];
+    for (const file of files) {
+      try {
+        const res = await fetch(`${API_BASE}/api/qw-report`, { method: 'POST', headers: { 'Content-Type': 'text/csv' }, body: await file.text() });
+        const body = await res.json();
+        results.push(res.ok
+          ? `✓ ${file.name}: ${body.type === 'revenue' ? `${body.slots} revenue slots` : `${body.signals} signals${body.rows_market_corrected ? `, ${body.rows_market_corrected} row market(s) corrected` : ''}`}`
+          : `✗ ${file.name}: ${body.detail || res.status}`);
+      } catch (e) {
+        results.push(`✗ ${file.name}: ${e}`);
+      }
+    }
+    setQwImport(results);
+    setReloadKey((k) => k + 1);
+  };
   const [backfillError, setBackfillError] = useState(null);
   const backfillRunning = backfill?.state === 'running';
 
@@ -195,6 +215,11 @@ function App() {
 
         const res = await fetch(url);
         const json = await res.json();
+        // Official Qilowatt report figures for the same period (if imported)
+        const qwUrl = `${API_BASE}/api/qw-report` + (from && to
+          ? `?from=${encodeURIComponent(from.toISOString())}&to=${encodeURIComponent(new Date(to).toISOString())}` : '');
+        const qwRes = await fetch(qwUrl).catch(() => null);
+        setQwReport(qwRes?.ok ? await qwRes.json() : []);
 
         // json shape: { "<timeslotISO>_<signal>": row, ... }: one row per slot and direction
         const enriched = Object.values(json).map((entry) => {
@@ -311,6 +336,22 @@ function App() {
     return acc;
   }, [data]);
 
+  // Official figures per slot and direction; shown once per (slot, direction)
+  const official = useMemo(() => {
+    const map = new Map();
+    for (const r of qwReport) {
+      const pct = (r.share_pct ?? 80) / 100;
+      map.set(`${r.timeslot}|UP`, { kwh: r.up_kwh, share: (r.up_net_eur ?? 0) * pct });
+      map.set(`${r.timeslot}|DOWN`, { kwh: r.down_kwh, share: (r.down_net_eur ?? 0) * pct });
+    }
+    return map;
+  }, [qwReport]);
+  const officialTotal = useMemo(
+    () => qwReport.reduce((acc, r) => ({ kwh: acc.kwh + (r.total_kwh || 0), share: acc.share + (r.share_eur || 0) }), { kwh: 0, share: 0 }),
+    [qwReport],
+  );
+  const officialShown = new Set();
+
   const formatVal = (val, digits = 2) => (val ? val.toFixed(digits) : '-');
   const percent = (count, total) => (total ? `${Math.round((count / total) * 100)}%` : '-');
   const formatDuration = (minutes) => {
@@ -361,6 +402,11 @@ function App() {
             )}
           </span>
           {priceSync.pending_slots > 0 && <span>Waiting for prices: {priceSync.pending_slots} slot(s)</span>}
+          <span title="aFRR energy prices are estimated until Volton publishes the aFRR clearing price">
+            aFRR: {priceSync.afrr_estimated_slots > 0 ? `${priceSync.afrr_estimated_slots} slot(s) estimated` : 'no estimated slots'}
+            {priceSync.afrr_last_check_at && ` · Volton checked ${fmtTime(priceSync.afrr_last_check_at)}`}
+            {priceSync.afrr_last_error && <span style={{ color: '#d33' }}> ✗ {priceSync.afrr_last_error}</span>}
+          </span>
           {priceSync.last_error && (
             <span style={{ color: '#d33', flexBasis: '100%' }}>
               Error: {priceSync.last_error}
@@ -376,7 +422,7 @@ function App() {
           onClick={() => setBackfillOpen((o) => !o)}
           style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontWeight: 'bold', color: 'inherit', fontSize: 'inherit' }}
         >
-          {backfillOpen ? '▾' : '▸'} Backfill from Home Assistant
+          {backfillOpen ? '▾' : '▸'} Backfill from Home Assistant · Import Qilowatt report
           {backfillRunning && ` · running ${backfill.progress}%`}
         </button>
         {backfillOpen && (
@@ -423,6 +469,19 @@ function App() {
             )}
             {backfill && backfill.state === 'error' && <div style={{ color: '#d33' }}>✗ {backfill.message}</div>}
             {backfillError && <div style={{ color: '#d33' }}>✗ {backfillError}</div>}
+            <div style={{ borderTop: '1px solid #8884', paddingTop: '0.5rem', marginTop: '0.25rem' }}>
+              <label>
+                <strong>Import Qilowatt report</strong> (balancing revenue and/or signals CSV)&nbsp;
+                <input type="file" accept=".csv,text/csv" multiple onChange={(e) => { importQwReports([...e.target.files]); e.target.value = ''; }} />
+              </label>
+              <div style={{ opacity: 0.75 }}>
+                Official per-slot energy and revenue are shown next to the tracker&apos;s figures (Kratt kWh / Kratt €).
+                A signals report also corrects the mFRR/aFRR market of matching rows.
+              </div>
+              {qwImport && qwImport.map((line) => (
+                <div key={line} style={{ color: line.startsWith('✓') ? 'green' : '#d33' }}>{line}</div>
+              ))}
+            </div>
           </div>
         )}
       </div>
@@ -486,9 +545,9 @@ function App() {
             <th>Split</th>
             <th>Count</th>
             <th>Duration</th>
-            <th>mFRR (kWh)</th>
+            <th>Energy (kWh)</th>
             <th>Grid (kWh)</th>
-            <th>mFRR</th>
+            <th>Activation</th>
             <th>NPS</th>
             <th>Net</th>
             <th>Average</th>
@@ -543,6 +602,16 @@ function App() {
             <td data-label="Backup (%)"> {percent(summary.total.backup, summary.total.count)}</td>
             <td data-label="Cancelled (%)"> {percent(summary.total.cancelled, summary.total.count)}</td>
           </tr>
+          {qwReport.length > 0 && (
+            <tr style={{ fontStyle: 'italic' }}>
+              <td><strong>Kratt report</strong></td>
+              <td colSpan={3} style={{ opacity: 0.75 }}>official, imported Qilowatt revenue report</td>
+              <td data-label="Energy (kWh)">{formatVal(officialTotal.kwh)} kWh</td>
+              <td></td>
+              <td data-label="Activation (official)" style={{ color: officialTotal.share >= 0 ? 'green' : 'red' }}>{formatVal(officialTotal.share, 2)} €</td>
+              <td colSpan={5}></td>
+            </tr>
+          )}
         </tbody>
       </table>
 
@@ -553,16 +622,19 @@ function App() {
             <th>Date</th>
             <th>Time</th>
             <th>Signal</th>
+            <th>Market</th>
             <th>Duration</th>
-            <th>mFRR (kWh)</th>
+            <th>Energy (kWh)</th>
             <th>Requested (kWh)</th>
             <th>Delivery</th>
             <th>Grid (kWh)</th>
             <th>NPS €</th>
-            <th>mFRR €</th>
+            <th>Activation €</th>
+            <th>Kratt kWh</th>
+            <th>Kratt €</th>
             <th>Net</th>
             <th>€/MWh</th>
-            <th>mFRR (€/MWh)</th>
+            <th>Price (€/MWh)</th>
             <th>NPS (€/MWh)</th>
             <th>Baseline (W)</th>
             <th>Start</th>
@@ -579,15 +651,31 @@ function App() {
               <td data-label="Signal" style={{ color: entry.signal === 'UP' ? 'green' : 'red', fontWeight: 'bold' }}>
                 {entry.signal}
               </td>
+              <td data-label="Market" title={entry.id?.endsWith('_r') ? 'mFRR ramp minute, priced with the next quarter' : undefined}>
+                {entry.market === 'AFRR' ? 'aFRR' : entry.market === 'MFRR' ? 'mFRR' : '-'}
+                {entry.id?.endsWith('_r') ? ' ↗' : ''}
+              </td>
               <td data-label="Duration">{entry.duration ?? '-'}</td>
-              <td data-label="mFRR (kWh)">{entry.energy_kwh?.toFixed(2)}</td>
+              <td data-label="Energy (kWh)">{entry.energy_kwh?.toFixed(2)}</td>
               <td data-label="Requested (kWh)">{typeof entry.requested_kwh === 'number' ? entry.requested_kwh.toFixed(2) : '-'}</td>
               <td data-label="Delivery">{typeof entry.delivery_pct === 'number' ? `${Math.round(entry.delivery_pct)}%` : '-'}</td>
               <td data-label="Grid (kWh)">{entry.grid_kwh?.toFixed(2)}</td>
               <td data-label="NPS (€)" style={{ color: entry.grid_cost * -1 >= 0 ? 'green' : 'red' }}>{safeFixed(entry.grid_cost * -1, 2)}</td>
-              <td data-label="mFRR (€)" style={{ color: entry.profit >= 0 ? 'green' : 'red' }}>
-                {entry.profit === null ? '-' : `${entry.profit.toFixed(2)} €`}
+              <td data-label="Activation (€)" style={{ color: entry.profit >= 0 ? 'green' : 'red' }}>
+                {entry.profit === null || entry.profit === undefined ? '-' : `${entry.profit.toFixed(2)} €`}
               </td>
+              {(() => {
+                const key = `${entry.timeslot}|${entry.signal}`;
+                const o = official.get(key);
+                if (!o || officialShown.has(key)) return (<><td data-label="Kratt kWh">-</td><td data-label="Kratt €">-</td></>);
+                officialShown.add(key);
+                return (
+                  <>
+                    <td data-label="Kratt kWh">{typeof o.kwh === 'number' ? o.kwh.toFixed(2) : '-'}</td>
+                    <td data-label="Kratt €" style={{ color: o.share >= 0 ? 'green' : 'red' }}>{o.share.toFixed(2)} €</td>
+                  </>
+                );
+              })()}
               <td data-label="Net (€)" style={{ color: entry.net_total >= 0 ? 'green' : 'red' }}>
                 {safeFixed(entry.net_total, 2)}
               </td>
@@ -596,7 +684,10 @@ function App() {
                   ? `${(entry.price_per_kwh * 1000).toFixed(2)}`
                   : '-'}
               </td>
-              <td data-label="mFRR (€/MWh)">{entry.mffr_price === null ? '-' : entry.mffr_price}</td>
+              <td data-label="Price (€/MWh)" title={entry.price_source === 'estimate' ? 'aFRR price not published yet: estimate (AFRR_PRICE_*_EUR_MWH)' : entry.price_source || undefined}>
+                {entry.mffr_price === null || entry.mffr_price === undefined ? '-' : entry.mffr_price}
+                {entry.price_source === 'estimate' ? ' est.' : ''}
+              </td>
               <td data-label="NPS (€/MWh)">{entry.nordpool_price === null ? '-' : (entry.nordpool_price * 1000).toFixed(2)}</td>
               <td data-label="Baseline (W)">{formatW(entry.baseline_w)}</td>
               <td data-label="Start">

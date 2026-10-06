@@ -6,11 +6,19 @@ import pytz
 from sqlite_utils import Database
 from sqlite_utils.db import NotFoundError
 
-from ha import SENSOR_NORDPOOL, GridMeter, get_entity, get_requested_w, get_signal, mffr_energy_kwh
+from ha import (SENSOR_NORDPOOL, GridMeter, classify_market, deviation_direction, get_entity,
+                get_requested_w, get_signal, get_source_changed)
 from baseline import SignalBaseline
 
 DB_PATH = "data/mffr.db"
 tz = pytz.timezone("Europe/Tallinn")
+SLOT = timedelta(minutes=15)
+
+# aFRR energy prices aren't published reliably yet: estimate (€/MWh) until Volton or a
+# Qilowatt report gives the real figure. Defaults are the rates implied by Kratt reports
+# (UP revenue ≈ 440 €/MWh, DOWN ≈ 530 €/MWh paid for absorbing → price −530).
+AFRR_PRICE_UP = float(os.getenv("AFRR_PRICE_UP_EUR_MWH", "440"))
+AFRR_PRICE_DOWN = float(os.getenv("AFRR_PRICE_DOWN_EUR_MWH", "-530"))
 
 # --- DB schema bootstrap ---
 init_db = Database(DB_PATH)
@@ -66,7 +74,10 @@ required_columns = {
     "requested_kwh": float,    # energy Kratt asked for (qw_powerlimit × metered time)
     "delivery_pct": float,     # delivered mFRR energy / requested energy
     "active_s": float,         # seconds this direction was active in the slot
-    "baseline_w": float        # locked baseline of the (latest) run in this slot
+    "baseline_w": float,       # locked baseline of the (latest) run in this slot
+    "market": str,             # MFRR / AFRR (NULL for rows recorded before market detection)
+    "price_timeslot": str,     # slot whose prices apply (next quarter for an mFRR ramp minute)
+    "price_source": str,       # btd / volton / estimate
 }
 for column, col_type in required_columns.items():
     if column not in init_db["slots"].columns_dict:
@@ -100,17 +111,24 @@ def cleanup_zero_min_rows():
         else:
             print(f"🧹 Scheduled cleanup failed: {e}")
 
-def slot_id(timeslot: str, signal: str) -> str:
-    return f"{timeslot}_{signal}"
+def slot_id(timeslot: str, market: str, signal: str, ramp: bool = False) -> str:
+    return f"{timeslot}_{market}_{signal}" + ("_r" if ramp else "")
 
 class Tracker:
     """Turns ticks of HA state into slot rows. The live job has one instance; a backfill
-    replays recorded history through its own instance with the same logic."""
+    replays recorded history through its own instance with the same logic.
+
+    Rows are per slot, market (MFRR/AFRR) and direction. Like Kratt, energy is split by the
+    sign of (grid − baseline) on every tick of a run — including an aFRR restore phase where
+    qw_mode may show the opposite direction — while requested energy and activity follow the
+    commanded direction.
+    """
 
     def __init__(self, store_baseline: bool = True):
         self.meter = GridMeter()
         self.baseline = SignalBaseline(store=store_baseline)
         self.last_logged_signal = None
+        self.run_market = None   # market of the current Kratt run
 
     def tick(self, now: datetime, fetch=None, write=True, live=True, db: Database | None = None):
         """Process one 10 s tick at `now`.
@@ -123,10 +141,9 @@ class Tracker:
             db = Database(DB_PATH)
             _with_busy_timeout(db)
 
-        minute = (now.minute // 15) * 15
-        timeslot = now.replace(minute=minute, second=0)
+        timeslot = now.replace(minute=(now.minute // 15) * 15, second=0, microsecond=0)
         key = timeslot.isoformat()
-        slot_end_time = timeslot + timedelta(minutes=15)
+        slot_end_time = timeslot + SLOT
 
         # Read the meter every tick so the next interval only covers the last ~10 s
         reading = self.meter.read(now, slot_start=timeslot, fetch=fetch)
@@ -139,116 +156,113 @@ class Tracker:
                 print(f"🔔 Signal became {signal} at {now.isoformat()}")
             self.last_logged_signal = signal
 
-        if not signal or not write:
+        if not signal:
+            self.run_market = None
             return
+        if self.run_market is None:
+            run_start = get_source_changed(fetch) or now
+            self.run_market = classify_market(run_start.astimezone(tz))
+            if live:
+                print(f"🏷️  Kratt run from {run_start.astimezone(tz).isoformat()} classified as {self.run_market}")
+        if not write:
+            return
+        market = self.run_market
 
-        row_id = slot_id(key, signal)
-        try:
-            row = db["slots"].get(row_id)
-        except NotFoundError:
-            row = None
+        # An mFRR activation starts one minute before its quarter; Kratt books that minute in
+        # the current slot but prices it with the next quarter's prices
+        ramp = market == "MFRR" and now.minute % 15 == 14
+        price_slot = (slot_end_time if ramp else timeslot).isoformat()
 
-        # Grid energy since the previous tick, integrated from the phase power sensors
         net_kwh, seconds = reading if reading else (0.0, 0.0)
+        baseline_kwh = baseline_w * seconds / 3_600_000.0
+        deviation_kwh = net_kwh - baseline_kwh
         requested_w = get_requested_w(fetch)
 
-        def totals(prev: dict | None) -> dict:
-            """Add this tick to the slot totals; mFRR energy is evaluated over the whole slot."""
-            prev = prev or {}
-            grid_kwh = (prev.get("grid_kwh") or 0.0) + net_kwh
-            metered_s = (prev.get("metered_s") or 0.0) + seconds
-            # Baseline energy is accumulated per tick, so several runs in one slot keep their own baseline
-            baseline_tick_kwh = baseline_w * seconds / 3_600_000.0
-            baseline_import = (prev.get("baseline_import_kwh") or 0.0) + max(0.0, baseline_tick_kwh)
-            baseline_export = (prev.get("baseline_export_kwh") or 0.0) + max(0.0, -baseline_tick_kwh)
-            energy_kwh = mffr_energy_kwh(signal, grid_kwh, baseline_import - baseline_export)
-            requested_kwh = (prev.get("requested_kwh") or 0.0) + (requested_w or 0.0) / 1000.0 * seconds / 3600.0
-            return {
-                "grid_kwh": round(grid_kwh, 5),
-                "grid_import_kwh": round((prev.get("grid_import_kwh") or 0.0) + max(0.0, net_kwh), 5),
-                "grid_export_kwh": round((prev.get("grid_export_kwh") or 0.0) + max(0.0, -net_kwh), 5),
-                "metered_s": round(metered_s, 1),
-                "baseline_import_kwh": round(baseline_import, 5),
-                "baseline_export_kwh": round(baseline_export, 5),
-                "baseline_w": baseline_w,
-                "energy_kwh": round(energy_kwh, 5),
-                "requested_kwh": round(requested_kwh, 5),
-                "delivery_pct": round(energy_kwh / requested_kwh * 100.0, 1) if requested_kwh > 0 else None,
+        def new_row(direction: str) -> dict:
+            row = {
+                "id": slot_id(key, market, direction, ramp),
+                "timeslot": key, "price_timeslot": price_slot, "market": market, "signal": direction,
+                "start": now.isoformat(), "end": now.isoformat(), "slot_end": slot_end_time.isoformat(),
+                "energy_kwh": 0.0, "grid_kwh": 0.0, "grid_import_kwh": 0.0, "grid_export_kwh": 0.0,
+                "metered_s": 0.0, "baseline_import_kwh": 0.0, "baseline_export_kwh": 0.0,
+                "baseline_w": baseline_w, "requested_kwh": 0.0, "delivery_pct": None,
+                "active_s": 0.0, "duration_min": 0, "cancelled": False, "was_backup": False,
+                "mffr_price": None, "nordpool_price": None, "profit": None, "price_source": None,
             }
+            if market == "AFRR":
+                row["mffr_price"] = AFRR_PRICE_UP if direction == "UP" else AFRR_PRICE_DOWN
+                row["price_source"] = "estimate"
+            return row
 
-        if row:
-            end_time = datetime.fromisoformat(row["end"])
-            if end_time < slot_end_time:
-                start_time = datetime.fromisoformat(row["start"])
-                # Count only time this direction was active: after a flip and back, the gap since
-                # this row's last tick is not added (capped at about one tick)
-                since_last_s = (now - end_time).total_seconds()
-                active_s = (row.get("active_s") or 0.0) + (since_last_s if since_last_s <= 20 else 10.0)
-                cancelled = now < (slot_end_time - timedelta(seconds=11))
-                was_backup = (start_time - timeslot).total_seconds() >= 15
-
-                update_data = {
-                    **totals(row),
-                    "end": now.isoformat(),
-                    "active_s": round(active_s, 1),
-                    "duration_min": round(active_s / 60),
-                    "cancelled": cancelled,
-                    "was_backup": was_backup,
-                    "slot_end": slot_end_time.isoformat(),
-                }
-                db["slots"].update(row_id, update_data)
-        else:
-            if (now - timeslot).total_seconds() < 5:
-                return
-
+        def load(direction: str) -> tuple[dict, bool]:
             try:
-                prev_slot_time = timeslot - timedelta(minutes=15)
-                previous = db["slots"].get(slot_id(prev_slot_time.isoformat(), signal))
-                previous_end = datetime.fromisoformat(previous["end"])
-                if abs((now - previous_end).total_seconds()) <= 7:
-                    return
+                return dict(db["slots"].get(slot_id(key, market, direction, ramp))), True
             except NotFoundError:
-                pass
+                return new_row(direction), False
 
-            entry = {
-                "id": row_id,
-                "timeslot": key,
-                "start": now.isoformat(),
-                "end": now.isoformat(),
-                "signal": signal,
-                **totals(None),
-                "mffr_price": None,
-                "nordpool_price": None,
-                "profit": None,
-                "duration_min": 0,
-                "active_s": seconds or 10.0,
-                "cancelled": False,
-                "was_backup": False,
-                "slot_end": slot_end_time.isoformat(),
-            }
-            db["slots"].insert(entry, pk="id", alter=True)
+        rows = {}   # direction → (row, exists)
 
-        if not live:
-            return
+        # Activity and requested energy: the commanded direction
+        row, exists = rows[signal] = load(signal)
+        end_time = datetime.fromisoformat(row["end"])
+        if exists:
+            # Count only time this direction was commanded: after a flip and back, the gap since
+            # this row's last tick is not added (capped at about one tick)
+            since_last_s = (now - end_time).total_seconds()
+            row["active_s"] = (row.get("active_s") or 0.0) + (since_last_s if since_last_s <= 20 else 10.0)
+        else:
+            row["active_s"] = seconds or 10.0
+        start_time = datetime.fromisoformat(row["start"])
+        row.update({
+            "end": now.isoformat(),
+            "duration_min": round(row["active_s"] / 60),
+            "cancelled": now < (slot_end_time - timedelta(seconds=11)),
+            "was_backup": (start_time - timeslot).total_seconds() >= 15,
+            "requested_kwh": (row.get("requested_kwh") or 0.0) + (requested_w or 0.0) * seconds / 3_600_000.0,
+            "baseline_w": baseline_w,
+        })
+
+        # Energy: the direction of the deviation from the baseline
+        direction = deviation_direction(deviation_kwh) or signal
+        if direction not in rows:
+            rows[direction] = load(direction)
+        row = rows[direction][0]
+        row.update({
+            "energy_kwh": (row.get("energy_kwh") or 0.0) + abs(deviation_kwh),
+            "grid_kwh": (row.get("grid_kwh") or 0.0) + net_kwh,
+            "grid_import_kwh": (row.get("grid_import_kwh") or 0.0) + max(0.0, net_kwh),
+            "grid_export_kwh": (row.get("grid_export_kwh") or 0.0) + max(0.0, -net_kwh),
+            "metered_s": (row.get("metered_s") or 0.0) + seconds,
+            "baseline_import_kwh": (row.get("baseline_import_kwh") or 0.0) + max(0.0, baseline_kwh),
+            "baseline_export_kwh": (row.get("baseline_export_kwh") or 0.0) + max(0.0, -baseline_kwh),
+        })
+
+        nps = self._nordpool_price(datetime.fromisoformat(price_slot)) if live else None
+        for row, exists in rows.values():
+            for k in ("energy_kwh", "grid_kwh", "grid_import_kwh", "grid_export_kwh", "baseline_import_kwh",
+                      "baseline_export_kwh", "requested_kwh"):
+                row[k] = round(row.get(k) or 0.0, 5)
+            row["metered_s"] = round(row.get("metered_s") or 0.0, 1)
+            row["active_s"] = round(row.get("active_s") or 0.0, 1)
+            requested = row["requested_kwh"]
+            row["delivery_pct"] = round(row["energy_kwh"] / requested * 100.0, 1) if requested > 0 else None
+            if nps is not None and row.get("nordpool_price") is None:
+                row["nordpool_price"] = nps
+            if exists:
+                db["slots"].update(row["id"], row, alter=True)
+            else:
+                db["slots"].insert(row, pk="id", alter=True)
+
+    def _nordpool_price(self, slot_start: datetime) -> float | None:
+        """Nord Pool price (€/kWh) for a slot from the HA Nord Pool sensor's attributes."""
         try:
             attrs = (get_entity(SENSOR_NORDPOOL) or {}).get("attributes", {})
-            raw_today = attrs.get("raw_today", []) or []
-            raw_tomorrow = attrs.get("raw_tomorrow", []) or []
-            for p in (raw_today + raw_tomorrow):
-                start = datetime.fromisoformat(p["start"])
-                end = datetime.fromisoformat(p["end"])
-                if start <= timeslot < end:
-                    price = round(p["value"], 5)
-                    try:
-                        row = db["slots"].get(row_id)
-                        if row.get("nordpool_price") is None:
-                            db["slots"].update(row_id, {"nordpool_price": price})
-                            print(f"📈 Set Nordpool price {price} €/kWh for slot {row_id}")
-                    except NotFoundError:
-                        pass
-                    break
+            for p in (attrs.get("raw_today", []) or []) + (attrs.get("raw_tomorrow", []) or []):
+                if datetime.fromisoformat(p["start"]) <= slot_start < datetime.fromisoformat(p["end"]):
+                    return round(p["value"], 5)
         except Exception as e:
             print(f"❌ Failed to fetch Nordpool price: {e}")
+        return None
 
 
 live_tracker = Tracker()
