@@ -361,3 +361,8 @@ button { font: inherit; }
 .act-row > div:nth-child(12), .act-total > div:nth-child(12) { font-size: 12px; white-space: nowrap; }
 .act-head .hint { gap: 3px; }
 .kpi-compare { padding: 4px 8px; margin: 2px 0; border-radius: 8px; background: var(--surface-2); align-self: flex-start; }
+
+/* average price card */
+.price-row { display: grid; grid-template-columns: 64px auto 1fr; align-items: center; gap: 10px; }
+.price-value { font-size: 24px; font-weight: 500; letter-spacing: -0.02em; }
+.price-row .pill { justify-self: start; }
