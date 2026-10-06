@@ -14,7 +14,7 @@ const HINTS = {
   delivery: 'Regulated energy ÷ requested energy. 100% means the battery followed the command fully; above 100% is overshoot.',
   activation: 'Your share of Kratt\'s activation revenue after Kratt\'s fee (20% by default). UP: (market price − NPS) × energy; DOWN: (NPS − market price) × energy.',
   net: 'Activation revenue plus the change in your electricity bill compared with staying at the baseline. With Fees on, network and seller fees are included; otherwise import is spot + VAT and export is spot.',
-  avg: 'Net result per MWh of regulated energy.',
+  effPrice: 'Effective price per kWh, including Kratt\'s payment and the energy bill effect (and fees when Fees is on). DOWN: what each kWh you charged actually cost you (negative = you were paid to charge). UP: what each kWh you delivered actually earned you. Compare with the average spot price of the same slots.',
   backup: 'Share of activations that started 15 s or more after their slot began (joined mid-slot).',
   cancelled: 'Share of activations that ended before their slot did. For mFRR the slot\'s last minute belongs to the next activation.',
   report: 'Official totals from the imported Qilowatt (KratTrade) revenue report for this period.',
@@ -393,9 +393,9 @@ function App() {
 
   const summary = useMemo(() => {
     const acc = {
-      up:  { energy: 0, grid_energy: 0, profit: 0, duration: 0, count: 0, backup: 0, cancelled: 0, grid: 0, kratt: 0, ffr: 0, net: 0, priceSum: 0, priceCount: 0, billSpot: 0, fees: 0, requested: 0, netOff: 0, netOn: 0 },
-      down:{ energy: 0, grid_energy: 0, profit: 0, duration: 0, count: 0, backup: 0, cancelled: 0, grid: 0, kratt: 0, ffr: 0, net: 0, priceSum: 0, priceCount: 0, billSpot: 0, fees: 0, requested: 0, netOff: 0, netOn: 0 },
-      total:{ energy: 0, grid_energy: 0, profit: 0, duration: 0, count: 0, backup: 0, cancelled: 0, grid: 0, kratt: 0, ffr: 0, net: 0, priceSum: 0, priceCount: 0, billSpot: 0, fees: 0, requested: 0, netOff: 0, netOn: 0 },
+      up:  { energy: 0, grid_energy: 0, profit: 0, duration: 0, count: 0, backup: 0, cancelled: 0, grid: 0, kratt: 0, ffr: 0, net: 0, priceSum: 0, priceCount: 0, billSpot: 0, fees: 0, requested: 0, netOff: 0, netOn: 0, netEnergy: 0, spotSum: 0, spotEnergy: 0 },
+      down:{ energy: 0, grid_energy: 0, profit: 0, duration: 0, count: 0, backup: 0, cancelled: 0, grid: 0, kratt: 0, ffr: 0, net: 0, priceSum: 0, priceCount: 0, billSpot: 0, fees: 0, requested: 0, netOff: 0, netOn: 0, netEnergy: 0, spotSum: 0, spotEnergy: 0 },
+      total:{ energy: 0, grid_energy: 0, profit: 0, duration: 0, count: 0, backup: 0, cancelled: 0, grid: 0, kratt: 0, ffr: 0, net: 0, priceSum: 0, priceCount: 0, billSpot: 0, fees: 0, requested: 0, netOff: 0, netOn: 0, netEnergy: 0, spotSum: 0, spotEnergy: 0 },
     };
 
     for (const entry of data) {
@@ -414,6 +414,8 @@ function App() {
       const billSpot = -(entry.grid_cost || 0);      // energy at spot (+ VAT on import)
       const feesEur = entry.fees_eur || 0;            // what network and seller fees add/save
       const requested = entry.requested_kwh || 0;
+      const hasNet = typeof (feesOn ? entry.net_total_fees : entry.net_total) === 'number';
+      const nps = typeof entry.nordpool_price === 'number' ? entry.nordpool_price : null;
       const krattFee = entry.kratt_fee || 0;
       const ffrIncome = entry.ffr_income || 0;
       const netTotal = (feesOn ? entry.net_total_fees : entry.net_total) || 0;
@@ -454,6 +456,8 @@ function App() {
         bucket.billSpot += billSpot;
         bucket.fees += feesEur;
         bucket.requested += requested;
+        if (hasNet) bucket.netEnergy += energy;
+        if (nps !== null) { bucket.spotSum += nps * energy; bucket.spotEnergy += energy; }
         bucket.kratt += krattFee;
         bucket.ffr += ffrIncome;
         bucket.net += netTotal;
@@ -549,6 +553,11 @@ function App() {
     down: percent(summary.down.count, summary.total.count),
   };
   const energySplit = summary.total.energy ? (summary.down.energy / summary.total.energy) * 100 : 50;
+  // Effective €/kWh: DOWN = what a kWh charged cost you, UP = what a kWh delivered earned you
+  // (Kratt payment + energy bill effect, + fees when on). Negative DOWN = you were paid.
+  const effPrice = (dir, b) => (b.netEnergy ? (dir === 'DOWN' ? -b.net : b.net) / b.netEnergy : null);
+  const spotAvg = (b) => (b.spotEnergy ? b.spotSum / b.spotEnergy : null);
+  const fmtKwh = (v) => (typeof v === 'number' ? `${v < 0 ? '−' : ''}${Math.abs(v).toFixed(3)}` : '–');
   const directionRows = [
     ['DOWN', summary.down, signalSplit.down],
     ['UP', summary.up, signalSplit.up],
@@ -690,6 +699,22 @@ function App() {
               {delivery !== null && <> · avg delivery <span className="num text">{delivery}%</span></>}
             </div>
           </div>
+          <div className="card kpi">
+            <div className="muted small"><Hint label="Average price · €/kWh" hint={HINTS.effPrice} align="right" /></div>
+            {[['DOWN', summary.down, 'charged'], ['UP', summary.up, 'delivered']].map(([dir, b, verb]) => {
+              const p = effPrice(dir, b);
+              const good = p !== null && (dir === 'DOWN' ? p <= 0 : p >= 0);
+              const word = p === null ? '' : dir === 'DOWN' ? (p <= 0 ? 'paid to you' : 'cost') : (p >= 0 ? 'earned' : 'lost');
+              return (
+                <div className="price-row" key={dir}>
+                  <span className={`pill pill-${dir}`}>{dir}</span>
+                  <span className={`num price-value ${p === null ? 'zero' : good ? 'pos' : 'neg'}`}>{p === null ? '–' : Math.abs(p).toFixed(3)}</span>
+                  <span className="muted small">{p === null ? '' : `${word} per kWh ${verb}`}<br />spot avg <span className="num">{fmtKwh(spotAvg(b))}</span></span>
+                </div>
+              );
+            })}
+            <div className="muted small">{feesOn ? 'incl. network & seller fees' : 'spot + VAT, without fees'}</div>
+          </div>
         </div>
 
         <div className="split-row">
@@ -708,7 +733,7 @@ function App() {
                 <div className="th r"><Hint label="Energy €" hint={HINTS.energyEur} align="right" /></div>
                 <div className="th r"><Hint label="Fees" hint={HINTS.feesEur} align="right" /></div>
                 <div className="th r"><Hint label="Net" hint={HINTS.net} align="right" /></div>
-                <div className="th r"><Hint label="Avg €/MWh" hint={HINTS.avg} align="right" /></div>
+                <div className="th r"><Hint label="€/kWh" hint={HINTS.effPrice} align="right" /></div>
                 <div className="th r"><Hint label="Backup · cancelled" hint={`Backup: ${HINTS.backup} Cancelled: ${HINTS.cancelled}`} align="right" /></div>
                 {directionRows.map(([dir, b, split]) => (
                   <div className="dir-row" key={dir}>
@@ -720,7 +745,7 @@ function App() {
                     <div className={`num r ${signClass(b.billSpot)}`}>{fmtEur(b.billSpot)}</div>
                     <div className={`num r ${feesOn ? signClass(b.fees) : 'excluded'}`}>{fmtEur(b.fees)}</div>
                     <div className={`num r ${signClass(b.net)}`}>{fmtEur(b.net)}</div>
-                    <div className="num r">{b.energy ? Math.round((b.net / b.energy) * 1000) : '–'}</div>
+                    <div className={`num r ${signClass(b.net)}`} title={dir === 'DOWN' ? 'Cost per kWh charged (negative = paid to you)' : 'Earned per kWh delivered'}>{fmtKwh(effPrice(dir, b))}</div>
                     <div className="num r muted">{percent(b.backup, b.count)} · {percent(b.cancelled, b.count)}</div>
                   </div>
                 ))}
@@ -733,7 +758,7 @@ function App() {
                   <div className={`num r ${signClass(summary.total.billSpot)}`}>{fmtEur(summary.total.billSpot)}</div>
                   <div className={`num r ${feesOn ? signClass(summary.total.fees) : 'excluded'}`}>{fmtEur(summary.total.fees)}</div>
                   <div className={`num r ${signClass(summary.total.net)}`}>{fmtEur(summary.total.net)}</div>
-                  <div className="num r">{summary.total.energy ? Math.round((summary.total.net / summary.total.energy) * 1000) : '–'}</div>
+                  <div className="num r muted">–</div>
                   <div className="num r muted">{percent(summary.total.backup, summary.total.count)} · {percent(summary.total.cancelled, summary.total.count)}</div>
                 </div>
                 {hasReport && (
