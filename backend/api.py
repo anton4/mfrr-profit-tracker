@@ -1,5 +1,6 @@
 # api.py
 import os
+from contextlib import asynccontextmanager
 from typing import Optional
 from datetime import datetime
 
@@ -15,7 +16,21 @@ import mffr_price_updater
 import backfill
 import qw_report
 
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    print("✅ Starting all schedulers from FastAPI")
+    main.write_current_timeslot()
+    profit_calc.run_profit_calculation()
+    mffr_price_updater.fetch_and_update_mffr_prices()
+    for scheduler in (main.scheduler, profit_calc.scheduler, mffr_price_updater.scheduler):
+        if not scheduler.running:
+            scheduler.start()
+    yield
+    for scheduler in (main.scheduler, profit_calc.scheduler, mffr_price_updater.scheduler):
+        if scheduler.running:
+            scheduler.shutdown(wait=False)
+
+app = FastAPI(lifespan=lifespan)
 DB_FILE = "data/mffr.db"
 STATIC_DIR = "static"   # built frontend (copied in by the Dockerfile)
 
@@ -128,19 +143,6 @@ def get_qw_report(
 ):
     """Official per-slot figures from imported Qilowatt revenue reports."""
     return qw_report.report_slots(_normalize_to_local_iso(from_ts), _normalize_to_local_iso(to_ts))
-
-@app.on_event("startup")
-def start_all_schedulers():
-    print("✅ Starting all schedulers from FastAPI")
-    main.write_current_timeslot()
-    profit_calc.run_profit_calculation()
-    mffr_price_updater.fetch_and_update_mffr_prices()
-    if not main.scheduler.running:
-        main.scheduler.start()
-    if not profit_calc.scheduler.running:
-        profit_calc.scheduler.start()
-    if not mffr_price_updater.scheduler.running:
-        mffr_price_updater.scheduler.start()
 
 # Serve the built frontend from the same container (must be mounted after the API routes)
 if os.path.isdir(STATIC_DIR):

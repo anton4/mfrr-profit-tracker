@@ -203,6 +203,8 @@ docker logs -f mfrr-tracker
 
 ### **Local development**
 
+The image builds the UI with Node 26 and runs the backend on Python 3.14. For local work you need Node ≥ 22.12 (required by Vite 8) and Python ≥ 3.12. Backend dependencies are pinned in `backend/requirements.txt` and frontend dependencies in `frontend/package-lock.json`.
+
 ```
 cd backend && uvicorn api:app --reload        # API on :8000
 cd frontend && npm install && npm run dev     # UI on :5173, proxies /api to :8000

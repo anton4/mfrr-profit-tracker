@@ -52,15 +52,13 @@ function App() {
   const [backfillError, setBackfillError] = useState(null);
   const backfillRunning = backfill?.state === 'running';
 
-  const loadBackfill = async () => {
-    try {
-      const res = await fetch(`${API_BASE}/api/backfill`);
-      if (res.ok) setBackfill(await res.json());
-    } catch (e) {
-      console.error('Backfill status fetch failed', e);
-    }
-  };
-  useEffect(() => { loadBackfill(); }, []);
+  // Backfill status on page load (e.g. a backfill started earlier is still running)
+  useEffect(() => {
+    fetch(`${API_BASE}/api/backfill`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((st) => { if (st) setBackfill(st); })
+      .catch((e) => console.error('Backfill status fetch failed', e));
+  }, []);
   // Poll while a backfill runs; reload the table when it finishes
   useEffect(() => {
     if (!backfillRunning) return undefined;
@@ -90,7 +88,7 @@ function App() {
       setBackfillError(String(e));
     }
   };
-  const [clock, setClock] = useState(Date.now());
+  const [clock, setClock] = useState(() => Date.now());
 
   // mFRR price sync status (Baltic Transparency Dashboard), refreshed every 30 s
   useEffect(() => {
