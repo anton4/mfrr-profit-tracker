@@ -313,3 +313,30 @@ button { font: inherit; }
 .seg-sm { align-self: flex-start; }
 .seg-sm button { padding: 6px 10px; min-height: 32px; font-size: 13px; }
 .field input:disabled { background: var(--surface-2); color: var(--muted); opacity: 1; }
+
+/* ---------- column hints ---------- */
+.hint { position: relative; display: inline-flex; align-items: center; gap: 4px; }
+.hint-btn {
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  width: 20px; height: 20px; margin: -4px -4px -4px 0; padding: 0; border: 0; border-radius: 50%;
+  background: transparent; color: var(--muted); cursor: help; opacity: 0.7;
+}
+.hint-btn:hover, .hint-btn:focus-visible { opacity: 1; color: var(--accent); }
+.hint-pop {
+  position: absolute; top: calc(100% + 8px); z-index: 20; width: max-content; max-width: 280px;
+  padding: 10px 12px; border-radius: 10px; background: var(--text); color: var(--bg);
+  font-size: 12.5px; font-weight: 400; line-height: 1.45; text-align: left;
+  text-transform: none; letter-spacing: normal; white-space: normal;
+  box-shadow: 0 8px 24px rgba(16, 24, 40, 0.18);
+  opacity: 0; visibility: hidden; transform: translateY(-4px); pointer-events: none;
+  transition: opacity 0.12s ease, transform 0.12s ease, visibility 0.12s;
+}
+.hint-left { left: -8px; }
+.hint-right { right: -8px; }
+.hint:hover .hint-pop, .hint:focus-within .hint-pop { opacity: 1; visibility: visible; transform: translateY(0); }
+/* tables scroll sideways; leave room so the first rows' hints aren't cut off */
+.dir-grid, .act-inner { padding-bottom: 4px; }
+
+/* ---------- activations: own scroll area with a pinned label row ---------- */
+.act-table { max-height: min(78vh, 920px); overflow: auto; overscroll-behavior: contain; }
+.act-head { position: sticky; top: 0; z-index: 5; box-shadow: 0 1px 0 var(--line); }
