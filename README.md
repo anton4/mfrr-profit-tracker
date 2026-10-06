@@ -113,6 +113,31 @@ The sync is on demand. The dashboard is only queried when a **finished** slot is
 
 * * * * *
 
+**mFRR vs aFRR**
+----------------
+
+Kratt dispatches both **mFRR** and **aFRR** through the same `qw_source` / `qw_mode` sensors. The tracker tells them apart by the run's start time, which is when `qw_source` switched to `Kratt`:
+
+-   **mFRR** runs start exactly one minute before a quarter (`hh:14`, `hh:29`, `hh:44` or `hh:59`, within 20 s), are updated about every 4 minutes and end on a quarter.
+
+-   **aFRR** runs start at arbitrary times, are updated about every minute, and end with a ~5-minute "restore" command at the baseline setpoint.
+
+This rule classified all runs in a Qilowatt signals report correctly. An imported signals report overrides it for the slots it covers.
+
+How the tracker counts and prices energy, like Kratt's settlement:
+
+-   **Direction split.** Energy is split by the sign of (grid − baseline) on every tick of a run, including an aFRR restore phase. Above the baseline counts as DOWN, below as UP. Requested energy follows `qw_mode`.
+
+-   **mFRR ramp minute.** The minute before the quarter is booked in its own slot (a row ending in `_r`, marked ↗ in the UI). It's priced with the **next** quarter's mFRR and Nord Pool prices, because Kratt treats it as part of that activation.
+
+-   **mFRR prices** come from the Baltic Transparency Dashboard.
+
+-   **aFRR prices** come from Volton's aFRR clearing price (`public-data.volton.energy/v1/afrr-clearing-price`) once it's published for the slot. Until then the tracker uses an estimate: `AFRR_PRICE_UP_EUR_MWH` (default 440) and `AFRR_PRICE_DOWN_EUR_MWH` (default −530), which are the rates implied by Kratt reports. Estimated prices are marked "est." in the UI. Volton's *capacity* price (€/MW/h) is a different, availability payment and isn't used.
+
+**Import Qilowatt report.** In the backfill panel you can upload the balancing revenue and signals CSVs from qilowatt.it. The official per-slot energy and revenue share are then shown next to the tracker's own figures (Kratt kWh / Kratt €), with an official total in the summary. You can also post a report directly: `POST /api/qw-report` with the CSV as the body.
+
+* * * * *
+
 **Backfill from Home Assistant**
 --------------------------------
 

@@ -4,7 +4,7 @@ from typing import Optional
 from datetime import datetime
 
 import pytz
-from fastapi import Body, FastAPI, HTTPException, Query
+from fastapi import Body, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlite_utils import Database
@@ -13,6 +13,7 @@ import main
 import profit_calc
 import mffr_price_updater
 import backfill
+import qw_report
 
 app = FastAPI()
 DB_FILE = "data/mffr.db"
@@ -108,6 +109,25 @@ def start_backfill(payload: dict = Body(...)):
         return backfill.start_job(start, end)
     except RuntimeError as e:
         raise HTTPException(409, str(e))
+
+@app.post("/api/qw-report")
+async def import_qw_report(request: Request):
+    """Import a Qilowatt balancing revenue or signals CSV (raw CSV as the request body)."""
+    content = await request.body()
+    if not content:
+        raise HTTPException(400, "Send the CSV file as the request body")
+    try:
+        return qw_report.import_report(content)
+    except (ValueError, KeyError) as e:
+        raise HTTPException(400, f"Could not import report: {e}")
+
+@app.get("/api/qw-report")
+def get_qw_report(
+    from_ts: Optional[str] = Query(None, alias="from"),
+    to_ts: Optional[str] = Query(None, alias="to"),
+):
+    """Official per-slot figures from imported Qilowatt revenue reports."""
+    return qw_report.report_slots(_normalize_to_local_iso(from_ts), _normalize_to_local_iso(to_ts))
 
 @app.on_event("startup")
 def start_all_schedulers():

@@ -1,5 +1,7 @@
 # ha.py — shared Home Assistant access + Kratt signal detection
 import os
+from datetime import datetime
+
 import requests
 
 HA_URL = os.getenv("HA_URL", "http://localhost:8123")
@@ -121,6 +123,30 @@ class GridMeter:
         return (prev[0] + power_w) / 2.0 * seconds / 3_600_000.0, seconds
 
 
+def get_source_changed(fetch=None):
+    """When qw_source last changed (the start of the current Kratt run), or None."""
+    entity = (fetch or get_entity)(SENSOR_SOURCE)
+    ts = (entity or {}).get("last_changed")
+    if not ts:
+        return None
+    try:
+        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def classify_market(run_start: datetime) -> str:
+    """mFRR vs aFRR from the run's start time.
+
+    Scheduled mFRR activations start exactly one minute before a quarter (hh:14/29/44/59:00)
+    and are updated every ~4 min; aFRR starts at arbitrary times, is updated about every
+    minute and ends with a ~5 min restore. Matched all 18 runs in a Qilowatt signals report.
+    """
+    if run_start.minute % 15 == 14 and run_start.second <= 20:
+        return "MFRR"
+    return "AFRR"
+
+
 def get_signal(fetch=None) -> str | None:
     """'UP' / 'DOWN' while Kratt is in control, otherwise None."""
     source = get_state(SENSOR_SOURCE, fetch)
@@ -134,11 +160,11 @@ def get_signal(fetch=None) -> str | None:
     return None
 
 
-def mffr_energy_kwh(signal: str, net_kwh: float, baseline_kwh: float) -> float:
-    """Kratt meters at the grid connection point: delivered energy is the metered net grid energy
-    vs. the baseline energy over the same time, counted only in the commanded direction."""
-    if signal == "DOWN":
-        return max(0.0, net_kwh - baseline_kwh)   # extra import
-    if signal == "UP":
-        return max(0.0, baseline_kwh - net_kwh)   # extra export / reduced import
-    return 0.0
+def deviation_direction(deviation_kwh: float) -> str | None:
+    """Kratt splits regulated energy by the sign of (grid − baseline): above the baseline
+    (more import / less export) is DOWN, below is UP — whatever the command says."""
+    if deviation_kwh > 0:
+        return "DOWN"
+    if deviation_kwh < 0:
+        return "UP"
+    return None

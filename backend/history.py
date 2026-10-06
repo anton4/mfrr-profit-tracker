@@ -73,6 +73,7 @@ class HistoryStates:
             return None   # no state recorded yet at this time
         unit = self._units.get(entity_id)
         return {"state": self._states[entity_id][i],
+                "last_changed": self._times[entity_id][i].isoformat(),
                 "attributes": {"unit_of_measurement": unit} if unit else {}}
 
 

@@ -32,7 +32,16 @@ sync_status = {
     "latest_down_price": None,    # €/MWh
     "pending_slots": 0,           # finished slots still waiting for a price
     "next_sync_at": None,         # None = no sync needed until a finished slot lacks a price
+    # aFRR: estimated until Volton publishes the aFRR clearing price for the slot
+    "afrr_source": "Volton aFRR clearing price",
+    "afrr_last_check_at": None,
+    "afrr_last_error": None,
+    "afrr_estimated_slots": 0,
 }
+
+VOLTON_AFRR_URL = "https://public-data.volton.energy/v1/afrr-clearing-price/latest.json"
+AFRR_RECHECK = timedelta(hours=1)
+AFRR_MAX_AGE = timedelta(days=3)    # stop looking for a published price after this
 
 # Ensure log folder exists
 os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
@@ -82,7 +91,8 @@ def apply_mffr_prices(db, rows, api_data: dict) -> int:
     updated = 0
     for row in rows:
         try:
-            slot_start = datetime.fromisoformat(row["timeslot"]).astimezone(pytz.utc)
+            # an mFRR ramp minute is priced with the next quarter (price_timeslot)
+            slot_start = datetime.fromisoformat(row.get("price_timeslot") or row["timeslot"]).astimezone(pytz.utc)
             mfrr_price = (api_data.get(slot_start) or {}).get(row["signal"])
 
             if mfrr_price is not None:
@@ -107,7 +117,7 @@ def fetch_and_update_mffr_prices():
     pending = []
     if "slots" in db.table_names():
         rows = db["slots"].rows_where(
-            "mffr_price IS NULL AND timeslot >= ?",
+            "mffr_price IS NULL AND COALESCE(market, 'MFRR') = 'MFRR' AND timeslot >= ?",
             [(now - MAX_LOOKBACK).isoformat()],
             order_by="timeslot",
         )
@@ -153,6 +163,62 @@ def fetch_and_update_mffr_prices():
     if updated:
         print(f"✅ Updated {updated} mFRR prices in SQLite DB.")
         print(f"⏱️ Completed in {time.time() - start_time:.2f} seconds.")
+
+def fetch_volton_afrr_prices() -> dict:
+    """{(utc_slot_start, "UP"/"DOWN"): €/MWh} for slots Volton has published."""
+    resp = requests.get(VOLTON_AFRR_URL, timeout=15)
+    resp.raise_for_status()
+    prices = {}
+    for r in resp.json().get("rows", []):
+        price = r.get("price_eur_mwh")
+        if price is not None:
+            start = datetime.fromisoformat(r["mtu_start"].replace("Z", "+00:00"))
+            prices[(start, r["direction"].upper())] = price
+    return prices
+
+def update_afrr_prices():
+    """Replace estimated aFRR prices with Volton's clearing price once published (on demand)."""
+    db = sqlite_utils.Database(DB_PATH)
+    if "slots" not in db.table_names() or "price_source" not in db["slots"].columns_dict:
+        return
+    now = datetime.now(tz)
+    rows = [r for r in db["slots"].rows_where(
+                "market = 'AFRR' AND price_source = 'estimate' AND timeslot >= ?",
+                [(now - AFRR_MAX_AGE).isoformat()])
+            if datetime.fromisoformat(r["timeslot"]) + SLOT <= now]
+    sync_status["afrr_estimated_slots"] = len(rows)
+    last = sync_status["afrr_last_check_at"]
+    if not rows or (last and now - datetime.fromisoformat(last) < AFRR_RECHECK):
+        return
+    sync_status["afrr_last_check_at"] = now.isoformat()
+    try:
+        prices = fetch_volton_afrr_prices()
+        sync_status["afrr_last_error"] = None
+    except Exception as e:
+        sync_status["afrr_last_error"] = str(e)
+        log_error(f"❌ Failed to fetch Volton aFRR prices: {e}")
+        return
+    updated = 0
+    for r in rows:
+        start = datetime.fromisoformat(r.get("price_timeslot") or r["timeslot"]).astimezone(pytz.utc)
+        price = prices.get((start, r["signal"]))
+        if price is not None:
+            # clear the profit so profit_calc recomputes it with the real price
+            db["slots"].update(r["id"], {"mffr_price": price, "price_source": "volton",
+                                         "profit": None, "net_total": None})
+            updated += 1
+    sync_status["afrr_estimated_slots"] = len(rows) - updated
+    if updated:
+        print(f"✅ Set Volton aFRR price for {updated} slot(s)")
+
+scheduler.add_job(
+    update_afrr_prices,
+    "interval",
+    id="afrr_prices",
+    minutes=5,
+    max_instances=1,
+    coalesce=True
+)
 
 scheduler.add_job(
     fetch_and_update_mffr_prices,
