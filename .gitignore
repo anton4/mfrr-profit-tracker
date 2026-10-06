@@ -5,3 +5,4 @@ backend/logs/
 __pycache__/
 *.pyc
 qilowatt-report-*.csv
+*.pdf
