@@ -17,6 +17,20 @@ function App() {
     try { localStorage.setItem('theme', dark ? 'dark' : 'light'); } catch { /* storage unavailable */ }
   };
   const [data, setData] = useState([]);
+  // Include seller and network fees in bill effect / net (remembered per browser)
+  const [feesOn, setFeesOnState] = useState(() => {
+    const param = new URLSearchParams(window.location.search).get('fees');
+    if (param === 'on' || param === 'off') return param === 'on';
+    try { return localStorage.getItem('fees') === 'on'; } catch { return false; }
+  });
+  const setFeesOn = (on) => {
+    setFeesOnState(on);
+    try { localStorage.setItem('fees', on ? 'on' : 'off'); } catch { /* storage unavailable */ }
+  };
+  const [feeConfig, setFeeConfig] = useState(null);   // { values, defaults, labels, unit }
+  const [feeDraft, setFeeDraft] = useState({});
+  const [feesOpen, setFeesOpen] = useState(false);
+  const [feeStatus, setFeeStatus] = useState(null);
   // Period: from ?range=… (shareable links), else today
   const [filter, setFilterState] = useState(() => {
     const range = new URLSearchParams(window.location.search).get('range');
@@ -70,6 +84,38 @@ function App() {
   };
   const [backfillError, setBackfillError] = useState(null);
   const backfillRunning = backfill?.state === 'running';
+
+  // Fee settings for the "with fees" figures
+  useEffect(() => {
+    fetch(`${API_BASE}/api/fees`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((cfg) => {
+        if (!cfg) return;
+        setFeeConfig(cfg);
+        setFeeDraft(Object.fromEntries(Object.entries(cfg.values).map(([k, v]) => [k, String(v)])));
+      })
+      .catch((e) => console.error('Fee settings fetch failed', e));
+  }, []);
+  const saveFees = async (values) => {
+    setFeeStatus(null);
+    const payload = {};
+    for (const [k, v] of Object.entries(values)) {
+      const n = Number(String(v).replace(',', '.'));
+      if (String(v).trim() === '' || Number.isNaN(n)) { setFeeStatus({ ok: false, text: `${feeConfig?.labels?.[k] ?? k}: not a number` }); return; }
+      payload[k] = n;
+    }
+    try {
+      const res = await fetch(`${API_BASE}/api/fees`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const body = await res.json();
+      if (!res.ok) { setFeeStatus({ ok: false, text: body.detail || `Save failed (${res.status})` }); return; }
+      setFeeConfig((c) => ({ ...c, values: body.values }));
+      setFeeDraft(Object.fromEntries(Object.entries(body.values).map(([k, v]) => [k, String(v)])));
+      setFeeStatus({ ok: true, text: 'Saved — figures with fees updated' });
+      setReloadKey((k) => k + 1);
+    } catch (e) {
+      setFeeStatus({ ok: false, text: String(e) });
+    }
+  };
 
   // Backfill status on page load (e.g. a backfill started earlier is still running)
   useEffect(() => {
@@ -306,11 +352,12 @@ function App() {
       const isBackup = !isRamp && Boolean(entry.was_backup);
       const isCancelled = !isRamp && Boolean(entry.cancelled);
 
-      const gridCost = entry.grid_cost || 0;
+      const gridCost = (feesOn ? entry.grid_cost_fees : entry.grid_cost) || 0;
       const krattFee = entry.kratt_fee || 0;
       const ffrIncome = entry.ffr_income || 0;
-      const netTotal = entry.net_total || 0;
-      const pricePerKwh = typeof entry.price_per_kwh === 'number' ? entry.price_per_kwh : null;
+      const netTotal = (feesOn ? entry.net_total_fees : entry.net_total) || 0;
+      const ppk = feesOn ? entry.price_per_kwh_fees : entry.price_per_kwh;
+      const pricePerKwh = typeof ppk === 'number' ? ppk : null;
 
       // Totals
       acc.total.energy += energy;
@@ -351,7 +398,7 @@ function App() {
     }
 
     return acc;
-  }, [data]);
+  }, [data, feesOn]);
 
   // Official figures per slot and direction; shown once per (slot, direction)
   const official = useMemo(() => {
@@ -399,6 +446,7 @@ function App() {
   const hm = (iso) => (iso ? new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : '–');
   const marketLabel = (m) => (m === 'AFRR' ? 'aFRR' : m === 'MFRR' ? 'mFRR' : '–');
   const isRamp = (e) => Boolean(e.id?.endsWith('_r'));
+  const netOf = (e) => (feesOn ? e.net_total_fees : e.net_total);
 
   // Delivery over all rows with a request: delivered / requested energy
   const delivery = useMemo(() => {
@@ -457,6 +505,11 @@ function App() {
                 </button>
               ))}
             </div>
+            <button type="button" className={`switch ${feesOn ? 'on' : ''}`} role="switch" aria-checked={feesOn}
+              title="Include seller and network fees in the bill effect and net result" onClick={() => setFeesOn(!feesOn)}>
+              <span className="switch-track" aria-hidden="true"><span className="switch-thumb" /></span>
+              Fees
+            </button>
             <button type="button" className="iconbtn" aria-label={darkMode ? 'Switch to light mode' : 'Switch to dark mode'} onClick={() => setDarkMode(!darkMode)}>
               {darkMode ? (
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></svg>
@@ -520,7 +573,7 @@ function App() {
 
         <div className="kpis">
           <div className="card kpi">
-            <div className="muted small">Net result</div>
+            <div className="muted small">Net result {feesOn ? '· incl. network & seller fees' : '· spot + VAT'}</div>
             <div className={`kpi-value num ${signClass(summary.total.net)}`}>{fmtEur(summary.total.net)}</div>
             <div className="muted small">
               Activation <span className="num">{fmtEur(summary.total.profit)}</span> · Bill effect <span className="num">{fmtEur(-summary.total.grid)}</span>
@@ -659,6 +712,36 @@ function App() {
             </div>
             <div className="divider" />
             <div className="tool">
+              <button type="button" className="disclosure" aria-expanded={feesOpen} onClick={() => setFeesOpen(!feesOpen)}>
+                <span className="tool-title">Electricity fees</span>
+                <span className="muted small">{feesOn ? 'included in net' : 'not included'}</span>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ transform: feesOpen ? 'rotate(180deg)' : undefined }}><path d="m6 9 6 6 6-6" /></svg>
+              </button>
+              {feesOpen && feeConfig && (
+                <>
+                  <div className="fee-grid">
+                    {Object.keys(feeConfig.values).map((k) => (
+                      <label key={k} className="field">
+                        <span>{feeConfig.labels[k]} <span className="unit">{k === 'vat' ? '%' : feeConfig.unit}</span></span>
+                        <input type="text" inputMode="decimal" value={feeDraft[k] ?? ''} placeholder={String(feeConfig.defaults[k])}
+                          onChange={(e) => setFeeDraft({ ...feeDraft, [k]: e.target.value })} />
+                      </label>
+                    ))}
+                  </div>
+                  <div className="tool-form">
+                    <button type="button" className="btn" onClick={() => saveFees(feeDraft)}>Save fees</button>
+                    <button type="button" className="btn-link" onClick={() => saveFees(feeConfig.defaults)}>Reset to defaults</button>
+                  </div>
+                  {feeStatus && <div className={`small ${feeStatus.ok ? 'ok' : 'err'}`}>{feeStatus.text}</div>}
+                  <div className="muted small">
+                    Cents/kWh excl. VAT. Import = (spot + fees) × (1 + VAT); export = spot − export fees. Night/weekend network rate
+                    before 07:00, from 22:00, on weekends and Estonian public holidays. Turn on <strong>Fees</strong> in the header to use them.
+                  </div>
+                </>
+              )}
+            </div>
+            <div className="divider" />
+            <div className="tool">
               <div className="tool-title">Qilowatt report</div>
               <label className="btn-ghost">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 16V4M6 10l6-6 6 6M4 20h16" /></svg>
@@ -716,7 +799,7 @@ function App() {
                           </div>
                           <div className={`num r ${signClass(entry.profit)}`}>{fmtEur(entry.profit)}</div>
                           <div className="num r muted">{kratt(entry)}</div>
-                          <div className={`num r strong ${signClass(entry.net_total)}`}>{fmtEur(entry.net_total)}</div>
+                          <div className={`num r strong ${signClass(netOf(entry))}`}>{fmtEur(netOf(entry))}</div>
                           <div className="num r" title={entry.price_source === 'estimate' ? 'aFRR price not published yet: estimate' : entry.price_source || undefined}>
                             {entry.mffr_price ?? '–'}
                             {entry.price_source === 'estimate' && <span className="badge badge-aFRR est">est.</span>}
@@ -727,7 +810,7 @@ function App() {
                             </button>
                           </div>
                         </div>
-                        {open && <RowDetails entry={entry} hm={hm} fmtNum={fmtNum} fmtEur={fmtEur} />}
+                        {open && <RowDetails entry={entry} feesOn={feesOn} hm={hm} fmtNum={fmtNum} fmtEur={fmtEur} />}
                       </div>
                     );
                   })}
@@ -751,7 +834,7 @@ function App() {
                       <div className="act-card-grid">
                         <div><div className="muted small">Energy</div><div className="num">{fmtNum(entry.energy_kwh)} kWh</div></div>
                         <div><div className="muted small">Delivery</div><div className="num">{typeof entry.delivery_pct === 'number' ? `${Math.round(entry.delivery_pct)}%` : '–'}</div></div>
-                        <div className="r"><div className="muted small">Net</div><div className={`num strong ${signClass(entry.net_total)}`}>{fmtEur(entry.net_total)}</div></div>
+                        <div className="r"><div className="muted small">Net</div><div className={`num strong ${signClass(netOf(entry))}`}>{fmtEur(netOf(entry))}</div></div>
                       </div>
                       <div className="act-card-foot small muted">
                         <span>Price <span className="num text">{entry.mffr_price ?? '–'}</span>{entry.price_source === 'estimate' ? ' est.' : ''}</span>
@@ -760,7 +843,7 @@ function App() {
                           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ transform: open ? 'rotate(180deg)' : undefined }}><path d="m6 9 6 6 6-6" /></svg>
                         </button>
                       </div>
-                      {open && <RowDetails entry={entry} hm={hm} fmtNum={fmtNum} fmtEur={fmtEur} />}
+                      {open && <RowDetails entry={entry} feesOn={feesOn} hm={hm} fmtNum={fmtNum} fmtEur={fmtEur} />}
                     </div>
                   );
                 })}
@@ -773,16 +856,19 @@ function App() {
   );
 }
 
-function RowDetails({ entry, hm, fmtNum, fmtEur }) {
+function RowDetails({ entry, feesOn, hm, fmtNum, fmtEur }) {
+  const gridCost = feesOn ? entry.grid_cost_fees : entry.grid_cost;
+  const ppk = feesOn ? entry.price_per_kwh_fees : entry.price_per_kwh;
   const yesNo = (v) => (v === undefined || v === null ? '–' : v ? 'Yes' : 'No');
   return (
     <div className="details">
       <div><div className="muted small">Grid</div><div className="num">{fmtNum(entry.grid_kwh)} kWh</div></div>
-      <div><div className="muted small">Bill effect</div><div className="num">{typeof entry.grid_cost === 'number' ? fmtEur(-entry.grid_cost) : '–'}</div></div>
+      <div><div className="muted small">Bill effect{feesOn ? ' (with fees)' : ''}</div><div className="num">{typeof gridCost === 'number' ? fmtEur(-gridCost) : '–'}</div></div>
+      <div><div className="muted small">Network rate</div><div>{entry.tariff_period === 'night' ? 'Night / weekend' : entry.tariff_period === 'day' ? 'Day' : '–'}</div></div>
       <div><div className="muted small">NPS</div><div className="num">{typeof entry.nordpool_price === 'number' ? `${(entry.nordpool_price * 1000).toFixed(2)} €/MWh` : '–'}</div></div>
       <div><div className="muted small">Baseline</div><div className="num">{typeof entry.baseline_w === 'number' ? `${Math.round(entry.baseline_w)} W` : '–'}</div></div>
       <div><div className="muted small">Start → end</div><div className="num">{hm(entry.start)} → {hm(entry.end)}</div></div>
-      <div><div className="muted small">€/MWh net</div><div className="num">{typeof entry.price_per_kwh === 'number' ? (entry.price_per_kwh * 1000).toFixed(2) : '–'}</div></div>
+      <div><div className="muted small">€/MWh net</div><div className="num">{typeof ppk === 'number' ? (ppk * 1000).toFixed(2) : '–'}</div></div>
       <div><div className="muted small">Backup</div><div>{yesNo(entry.was_backup)}</div></div>
       <div><div className="muted small">Cancelled</div><div>{yesNo(entry.cancelled)}</div></div>
     </div>

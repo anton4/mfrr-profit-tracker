@@ -259,8 +259,8 @@ button { font: inherit; }
 @media (max-width: 720px) {
   .page { gap: 16px; padding-top: 20px; }
   h1 { font-size: 18px; }
-  .toolbar { width: 100%; justify-content: space-between; flex-wrap: nowrap; }
-  .seg { flex-wrap: nowrap; overflow-x: auto; max-width: calc(100% - 54px); }
+  .toolbar { width: 100%; justify-content: flex-end; }
+  .seg { flex: 1 1 100%; flex-wrap: nowrap; overflow-x: auto; max-width: 100%; }
   .seg button { flex: none; }
   .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .kpi { padding: 14px; }
@@ -269,4 +269,41 @@ button { font: inherit; }
   .act-table { display: none; }
   .act-cards { display: flex; }
   .section-head.padded { padding: 14px 16px; }
+}
+
+/* ---------- fees switch & settings ---------- */
+.switch {
+  display: inline-flex; align-items: center; gap: 10px; height: 44px; padding: 0 14px 0 10px; cursor: pointer;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font-weight: 500;
+}
+.switch:hover { background: var(--surface-2); }
+.switch-track {
+  position: relative; width: 34px; height: 20px; border-radius: 999px; flex: none;
+  background: var(--line); transition: background 0.15s ease;
+}
+.switch-thumb {
+  position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%;
+  background: var(--surface); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25); transition: transform 0.15s ease;
+}
+.switch.on .switch-track { background: var(--accent); }
+.switch.on .switch-thumb { transform: translateX(14px); }
+
+.disclosure {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 36px; padding: 0;
+  border: 0; background: transparent; color: var(--text); cursor: pointer; text-align: left;
+}
+.disclosure .tool-title { flex: 1; }
+.disclosure svg { transition: transform 0.15s ease; color: var(--muted); }
+
+.fee-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+.fee-grid .field input { width: 100%; }
+.unit { color: var(--muted); font-size: 11px; }
+.btn-link {
+  border: 0; background: transparent; cursor: pointer; height: 44px; padding: 0 6px;
+  color: var(--accent); font-weight: 500;
+}
+.btn-link:hover { text-decoration: underline; }
+
+@media (max-width: 720px) {
+  .switch { padding: 0 10px; }
 }

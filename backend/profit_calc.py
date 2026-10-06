@@ -4,14 +4,14 @@ import os
 import pytz
 from sqlite_utils import Database
 
+import fees
+
 DB_PATH = "data/mffr.db"
 tz = pytz.timezone("Europe/Tallinn")
 
 # ---- Tunables (can be overridden via env) ----
 # Kratt keeps 20% → you receive 80% of activation revenue
 KRATT_SHARE = float(os.getenv("KRATT_SHARE", "0.20"))   # 0.20 = 20%
-# VAT or multiplier applied to grid import cost (Nordpool energy only part)
-GRID_IMPORT_MULT = float(os.getenv("GRID_IMPORT_MULT", "1.24"))
 # Minimum energy to consider (filter noise)
 MIN_ENERGY_KWH = float(os.getenv("MIN_ENERGY_KWH", "0.00001"))
 
@@ -22,6 +22,7 @@ def run_profit_calculation():
     db = Database(DB_PATH)
     now = datetime.now(tz)
     updated = False
+    fee_values = fees.get_fees(db)
 
     # Only (re)compute finished slots
     for row in db["slots"].rows_where("profit IS NULL OR net_total IS NULL"):
@@ -35,12 +36,6 @@ def run_profit_calculation():
         direction   = row.get("signal")              # "UP" or "DOWN"
         energy_kwh  = row.get("energy_kwh")          # >= 0, grid deviation in commanded direction
         grid_kwh    = row.get("grid_kwh")            # net: +import, -export
-        # Import/export metered separately (older rows only have the net)
-        grid_import = row.get("grid_import_kwh")
-        grid_export = row.get("grid_export_kwh")
-        if grid_import is None or grid_export is None:
-            grid_import = max(0.0, grid_kwh or 0.0)
-            grid_export = max(0.0, -(grid_kwh or 0.0))
         mffr_price  = row.get("mffr_price")          # €/MWh from your updater
         nps_price   = row.get("nordpool_price")      # €/kWh (Nordpool)
 
@@ -72,21 +67,9 @@ def run_profit_calculation():
             continue
         kratt_fee = activation_income * (KRATT_SHARE / your_share) if your_share > 0 else 0.0
 
-        baseline_import = row.get("baseline_import_kwh")
-        baseline_export = row.get("baseline_export_kwh")
-        if baseline_import is not None and baseline_export is not None:
-            # Electricity bill effect of the activation only: metered import/export vs. what the
-            # baseline would have imported/exported over the same time. Import costs nps * VAT
-            # multiplier, export earns nps.
-            extra_import = grid_import - baseline_import
-            extra_export = grid_export - baseline_export
-            bill_effect = extra_export * nps_price - extra_import * nps_price * GRID_IMPORT_MULT
-        elif direction == "DOWN":
-            # Legacy rows: all import in the slot
-            bill_effect = -nps_price * GRID_IMPORT_MULT * grid_import
-        else:
-            # Legacy rows: all export in the slot
-            bill_effect = nps_price * grid_export
+        # Electricity bill effect of the activation only (vs. the baseline), spot + VAT on import.
+        # The variant with seller and network fees is computed per request in api.py.
+        bill_effect = fees.bill_effect(row, with_fees=False, fees=fee_values)
 
         net_total     = activation_income + bill_effect
         price_per_kwh = (net_total / energy_kwh) if energy_kwh > 0 else None

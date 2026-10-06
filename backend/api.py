@@ -15,6 +15,7 @@ import profit_calc
 import mffr_price_updater
 import backfill
 import qw_report
+import fees
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -98,8 +99,41 @@ def get_mffr_data(
         print(f"DB query failed: where='{where_clause}' args={params} err={e}")
         raise
 
-    # One row per slot and direction, keyed by id ("<timeslot>_<signal>")
+    # Variant with seller and network fees, computed with the current fee settings so edits
+    # apply instantly (the stored grid_cost / net_total are spot + VAT only)
+    fee_values = fees.get_fees(_db)
+    for row in rows:
+        slot = row.get("price_timeslot") or row.get("timeslot")
+        row["tariff_period"] = ("night" if fees.is_night(datetime.fromisoformat(slot)) else "day") if slot else None
+        bill = fees.bill_effect(row, with_fees=True, fees=fee_values) if row.get("profit") is not None else None
+        if bill is None:
+            row["grid_cost_fees"] = row["net_total_fees"] = row["price_per_kwh_fees"] = None
+            continue
+        net = row["profit"] + bill
+        energy = row.get("energy_kwh") or 0.0
+        row["grid_cost_fees"] = round(-bill, 5)
+        row["net_total_fees"] = round(net, 5)
+        row["price_per_kwh_fees"] = round(net / energy, 5) if energy > 0 else None
+
+    # One row per slot, market and direction, keyed by id
     return {row["id"]: row for row in rows}
+
+@app.get("/api/fees")
+def get_fee_settings():
+    """Seller and network fees (cents/kWh excl. VAT; VAT in %) used for the 'with fees' figures."""
+    return {
+        "values": fees.get_fees(),
+        "defaults": fees.DEFAULTS,
+        "labels": {k: label for k, (label, _) in fees.FIELDS.items()},
+        "unit": "s/kWh",
+    }
+
+@app.put("/api/fees")
+def put_fee_settings(payload: dict = Body(...)):
+    try:
+        return {"values": fees.save_fees(payload)}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 @app.get("/api/price-sync")
 def get_price_sync():

@@ -90,11 +90,11 @@ UP:   mFRR energy = max(0, baseline_kWh − net_grid_kWh)   # extra export / les
 ```
 activation = (mFRR − NPS) × mFRR energy × (1 − KRATT_SHARE)    # UP
 activation = (NPS − mFRR) × mFRR energy × (1 − KRATT_SHARE)    # DOWN
-bill effect = (export − baseline export) × NPS − (import − baseline import) × NPS × GRID_IMPORT_MULT
+bill effect = (export − baseline export) × export price − (import − baseline import) × import price
 net = activation + bill effect
 ```
 
-Only the change against the baseline counts toward the bill effect. Normal household consumption and PV export that would have happened anyway aren't attributed to mFRR. `GRID_IMPORT_MULT` (default 1.24) adds VAT on imported energy. Network fees are not included.
+Only the change against the baseline counts toward the bill effect. Normal household consumption and PV export that would have happened anyway aren't attributed to mFRR. By default, import is priced at spot + VAT and export at spot. With **Fees** switched on, the seller and network fees are included (see below).
 
 The activation formulas follow community knowledge of Fusebox settlement. Kratt hasn't published its exact settlement formula, so treat the numbers as estimates.
 
@@ -110,6 +110,42 @@ The value of the energy stored in or taken from the battery isn't counted. DOWN 
 Set `MFRR_PRICE_AREA` (`Estonia` / `Latvia` / `Lithuania`) to use another bidding zone.
 
 The sync is on demand. The dashboard is only queried when a **finished** slot is missing its mFRR price, and then at most every 5 minutes until the price is published (`MFRR_PRICE_RECHECK_MIN`). Without recent mFRR commands, no requests are made. The UI shows the last sync (and any error), the next sync ("not needed" when nothing is waiting), and the newest slot with published prices seen in the last sync. The same information is available at `/api/price-sync`.
+
+* * * * *
+
+**Electricity fees**
+--------------------
+
+The **Fees** switch in the header toggles the bill effect, net result and €/MWh between two pricings. Activation revenue and the Kratt comparison are the same either way.
+
+-   **Off:** import = spot × (1 + VAT), export = spot.
+
+-   **On:** seller and network fees are added:
+
+```
+tariff      = margin + taastuv + aktsiis + tasakaal + varustus + (elektrilevi_day | elektrilevi_night)
+import cost = (spot + tariff) × (1 + VAT/100)
+export      = spot − export_margin − export_tasakaal          (no VAT)
+```
+
+The night/weekend network rate applies before 07:00, from 22:00, on Saturdays and Sundays, and on Estonian public holidays. The holidays include Good Friday, Easter Sunday and Pentecost, which are calculated each year. The rate is chosen by the local time of each 15-minute slot.
+
+Edit the fees under **Data tools → Electricity fees**. Values are in cents/kWh excl. VAT and are saved in the database. Changes apply immediately to all figures, including history. The defaults (Oct 2026):
+
+| Fee | Default |
+|---|---|
+| Seller margin | 0 (contract-specific) |
+| Renewable energy fee (taastuvenergia tasu) | 0.84 |
+| Electricity excise (elektriaktsiis), from 1 May 2026 | 0.307 |
+| Balancing capacity fee (tasakaalustamisvõimsuse tasu) | 0.373 |
+| Security of supply fee (varustuskindluse tasu) | 0.758 |
+| Elektrilevi Võrk 2 day / night (7.53 / 4.35 incl. VAT) | 6.07 / 3.51 |
+| VAT | 24 % |
+| Export margin, export balancing fee | 0 (contract-specific) |
+
+Defaults can be overridden with `FEE_MARGIN`, `FEE_TAASTUV`, `FEE_AKTSIIS`, `FEE_TASAKAAL`, `FEE_VARUSTUS`, `FEE_ELEKTRILEVI_DAY`, `FEE_ELEKTRILEVI_NIGHT`, `FEE_VAT`, `FEE_EXPORT_MARGIN` and `FEE_EXPORT_TASAKAAL`. One set of values applies to all history; rate changes over time aren't modelled. Pick the day/night prices of your own Elektrilevi package (Võrk 4: 4.58 / 2.60 incl. VAT).
+
+The `?fees=on|off` and `?range=this_month` URL parameters open the dashboard with that setting.
 
 * * * * *
 
@@ -169,6 +205,8 @@ How to run it:
 -   backend/api.py: FastAPI app. Serves `/api/mffr`, `/api/price-sync`, `/api/backfill` and the built UI, and starts all schedulers.
 
 -   backend/backfill.py / backend/history.py: Backfill from the HA history API.
+
+-   backend/fees.py: Import/export prices with seller and network fees, day/night rate and Estonian holidays.
 
 -   backend/ha.py: Home Assistant access and Kratt signal detection.
 
