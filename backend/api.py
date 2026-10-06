@@ -6,6 +6,7 @@ from datetime import datetime
 import pytz
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from sqlite_utils import Database
 
 import main
@@ -15,9 +16,7 @@ import baseline
 
 app = FastAPI()
 DB_FILE = "data/mffr.db"
-
-# ❌ remove the global connection:
-# db = Database(DB_FILE)
+STATIC_DIR = "static"   # built frontend (copied in by the Dockerfile)
 
 LOCAL_TZ = pytz.timezone(os.getenv("TZ", "Europe/Tallinn"))
 
@@ -102,3 +101,7 @@ def start_all_schedulers():
     if not baseline.scheduler.running:
         print("▶️ Starting baseline scheduler")
         baseline.scheduler.start()
+
+# Serve the built frontend from the same container (must be mounted after the API routes)
+if os.path.isdir(STATIC_DIR):
+    app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="ui")

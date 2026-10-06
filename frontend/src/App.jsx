@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import './App.css';
 
-const API_BASE = `${window.location.protocol}//${window.location.hostname}:8099`;
+const API_BASE = ""; // same origin: the backend serves this UI (vite dev proxies /api)
 
 function App() {
   const [darkMode, setDarkMode] = useState(false);
@@ -152,9 +152,9 @@ function App() {
 
   const summary = useMemo(() => {
     const acc = {
-      up:  { energy: 0, grid_energy: 0, profit: 0, duration: 0, count: 0, backup: 0, cancelled: 0, grid: 0, fusebox: 0, ffr: 0, net: 0, priceSum: 0, priceCount: 0 },
-      down:{ energy: 0, grid_energy: 0, profit: 0, duration: 0, count: 0, backup: 0, cancelled: 0, grid: 0, fusebox: 0, ffr: 0, net: 0, priceSum: 0, priceCount: 0 },
-      total:{ energy: 0, grid_energy: 0, profit: 0, duration: 0, count: 0, backup: 0, cancelled: 0, grid: 0, fusebox: 0, ffr: 0, net: 0, priceSum: 0, priceCount: 0 },
+      up:  { energy: 0, grid_energy: 0, profit: 0, duration: 0, count: 0, backup: 0, cancelled: 0, grid: 0, kratt: 0, ffr: 0, net: 0, priceSum: 0, priceCount: 0 },
+      down:{ energy: 0, grid_energy: 0, profit: 0, duration: 0, count: 0, backup: 0, cancelled: 0, grid: 0, kratt: 0, ffr: 0, net: 0, priceSum: 0, priceCount: 0 },
+      total:{ energy: 0, grid_energy: 0, profit: 0, duration: 0, count: 0, backup: 0, cancelled: 0, grid: 0, kratt: 0, ffr: 0, net: 0, priceSum: 0, priceCount: 0 },
     };
 
     for (const entry of data) {
@@ -167,7 +167,7 @@ function App() {
       const isCancelled = Boolean(entry.cancelled);
 
       const gridCost = entry.grid_cost || 0;
-      const fuseboxFee = entry.fusebox_fee || 0;
+      const krattFee = entry.kratt_fee || 0;
       const ffrIncome = entry.ffr_income || 0;
       const netTotal = entry.net_total || 0;
       const pricePerKwh = typeof entry.price_per_kwh === 'number' ? entry.price_per_kwh : null;
@@ -180,7 +180,7 @@ function App() {
       acc.total.backup += isBackup ? 1 : 0;
       acc.total.cancelled += isCancelled ? 1 : 0;
       acc.total.grid += gridCost;
-      acc.total.fusebox += fuseboxFee;
+      acc.total.kratt += krattFee;
       acc.total.ffr += ffrIncome;
       acc.total.net += netTotal;
       if (pricePerKwh !== null) {
@@ -198,7 +198,7 @@ function App() {
         bucket.backup += isBackup ? 1 : 0;
         bucket.cancelled += isCancelled ? 1 : 0;
         bucket.grid += gridCost;
-        bucket.fusebox += fuseboxFee;
+        bucket.kratt += krattFee;
         bucket.ffr += ffrIncome;
         bucket.net += netTotal;
         if (pricePerKwh !== null) {
