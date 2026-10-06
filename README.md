@@ -1,4 +1,4 @@
-**MFFR Profit Tracker**
+**mFRR Profit Tracker**
 =======================
 
 Track Manual Frequency Restoration Reserve (mFRR) activations dispatched by **Kratt**, along with grid energy, prices, and profits, in near real-time using Home Assistant. It runs as a single container: a FastAPI backend that also serves the React frontend.
@@ -11,8 +11,8 @@ Track Manual Frequency Restoration Reserve (mFRR) activations dispatched by **Kr
 ### **1\. Clone the Repository**
 
 ```
-git clone https://github.com/martinarva/mffr-profit-tracker.git
-cd mffr-profit-tracker
+git clone https://github.com/anton4/mFRR-Profit-Tracker.git
+cd mFRR-Profit-Tracker
 ```
 
 ### **2\. Environment Configuration**
@@ -71,7 +71,7 @@ UP:   mFRR power (W) = max(0, baseline - grid_power)   # extra export / less imp
 
 `mffr_price_updater.py` fetches 15-minute mFRR balancing energy prices (€/MWh, Estonia Upward / Downward) from the [Baltic Transparency Dashboard](https://baltic.transparency-dashboard.eu/) published by Elering, AST and Litgrid. UP slots get the upward price and DOWN slots get the downward price. Prices are published about 1 hour after the slot. Unpriced slots from the last 7 days are retried every minute.
 
-Set `MFFR_PRICE_AREA` (`Estonia` / `Latvia` / `Lithuania`) to use another bidding zone.
+Set `MFRR_PRICE_AREA` (`Estonia` / `Latvia` / `Lithuania`) to use another bidding zone.
 
 * * * * *
 
@@ -108,7 +108,7 @@ Open the UI at `http://your-ip:8099/`
 Logs:
 
 ```
-docker logs -f mffr-tracker
+docker logs -f mfrr-tracker
 ```
 
 ### **Local development**

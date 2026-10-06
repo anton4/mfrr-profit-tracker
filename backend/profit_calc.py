@@ -47,7 +47,7 @@ def run_profit_calculation():
             # Missing prices or grid energy → skip for now
             continue
 
-        # Convert MFFR €/MWh → €/kWh
+        # Convert mFRR €/MWh → €/kWh
         mffr_eur_per_kwh = (mffr_price / 1000.0)
 
         # Your share of activation revenue after Kratt

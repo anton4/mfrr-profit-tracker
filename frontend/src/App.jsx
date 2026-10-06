@@ -229,7 +229,7 @@ function App() {
 
   return (
     <div className={darkMode ? 'dark' : 'light'} style={{ padding: '2rem' }}>
-      <h1 style={{ fontSize: '2rem', fontWeight: 'bold' }}>MFFR Profit Tracker</h1>
+      <h1 style={{ fontSize: '2rem', fontWeight: 'bold' }}>mFRR Profit Tracker</h1>
 
       <div style={{ marginBottom: '1rem' }}>
         <label>Filter:&nbsp;</label>
@@ -292,7 +292,7 @@ function App() {
             <th>Duration</th>
             <th>Battery (kWh)</th>
             <th>Grid (kWh)</th>
-            <th>MFFR</th>
+            <th>mFRR</th>
             <th>NPS</th>
             <th>Net</th>
             <th>Average</th>
@@ -308,7 +308,7 @@ function App() {
             <td data-label="Duration">{formatDuration(summary.down.duration)}</td>
             <td data-label="Battery">{formatVal(summary.down.energy)} kWh</td>
             <td data-label="Grid">{formatVal(summary.down.grid_energy)} kWh</td>
-            <td data-label="MFFR" style={{ color: summary.down.profit >= 0 ? 'green' : 'red' }}>{formatVal(summary.down.profit, 2)} €</td>
+            <td data-label="mFRR" style={{ color: summary.down.profit >= 0 ? 'green' : 'red' }}>{formatVal(summary.down.profit, 2)} €</td>
             <td data-label="NPS" style={{ color: summary.down.grid * -1 >= 0 ? 'green' : 'red' }}>{formatVal(summary.down.grid * -1, 2)} €</td>
             <td data-label="Net" style={{ color: summary.down.net >= 0 ? 'green' : 'red' }}>{formatVal(summary.down.net, 2)} €</td>
             <td data-label="Average" style={{ color: summary.down.net >= 0 ? 'green' : 'red' }}>
@@ -324,7 +324,7 @@ function App() {
             <td data-label="Duration">{formatDuration(summary.up.duration)}</td>
             <td data-label="Battery">{formatVal(summary.up.energy)} kWh</td>
             <td data-label="Grid">{formatVal(summary.up.grid_energy)} kWh</td>
-            <td data-label="MFFR" style={{ color: summary.up.profit >= 0 ? 'green' : 'red' }}>{formatVal(summary.up.profit, 2)} €</td>
+            <td data-label="mFRR" style={{ color: summary.up.profit >= 0 ? 'green' : 'red' }}>{formatVal(summary.up.profit, 2)} €</td>
             <td data-label="NPS" style={{ color: summary.up.grid * -1 >= 0 ? 'green' : 'red' }}>{formatVal(summary.up.grid * -1, 2)} €</td>
             <td data-label="Net" style={{ color: summary.up.net >= 0 ? 'green' : 'red' }}>{formatVal(summary.up.net, 2)} €</td>
             <td data-label="Average" style={{ color: summary.up.net >= 0 ? 'green' : 'red' }}>
@@ -340,7 +340,7 @@ function App() {
             <td data-label="Duration">{formatDuration(summary.total.duration)}</td>
             <td data-label="Battery">{formatVal(summary.total.energy)} kWh</td>
             <td data-label="Grid">{formatVal(summary.total.grid_energy)} kWh</td>
-            <td data-label="MFFR" style={{ color: summary.total.profit >= 0 ? 'green' : 'red' }}>{formatVal(summary.total.profit, 2)} €</td>
+            <td data-label="mFRR" style={{ color: summary.total.profit >= 0 ? 'green' : 'red' }}>{formatVal(summary.total.profit, 2)} €</td>
             <td data-label="NPS" style={{ color: summary.total.grid * -1 >= 0 ? 'green' : 'red' }}>{formatVal(summary.total.grid * -1, 2)} €</td>
             <td data-label="Net" style={{ color: summary.total.net >= 0 ? 'green' : 'red' }}>{formatVal(summary.total.net, 2)} €</td>
             <td></td>
@@ -361,10 +361,10 @@ function App() {
             <th>Battery (kWh)</th>
             <th>Grid (kWh)</th>
             <th>NPS €</th>
-            <th>MFFR €</th>
+            <th>mFRR €</th>
             <th>Net</th>
             <th>€/MWh</th>
-            <th>MFFR (€/MWh)</th>
+            <th>mFRR (€/MWh)</th>
             <th>NPS (€/MWh)</th>
             <th>Baseline (W)</th>
             <th>Start</th>
@@ -385,7 +385,7 @@ function App() {
               <td data-label="Battery (kWh)">{entry.energy_kwh?.toFixed(2)}</td>
               <td data-label="Grid (kWh)">{entry.grid_kwh?.toFixed(2)}</td>
               <td data-label="NPS (€)" style={{ color: entry.grid_cost * -1 >= 0 ? 'green' : 'red' }}>{safeFixed(entry.grid_cost * -1, 2)}</td>
-              <td data-label="MFFR (€)" style={{ color: entry.profit >= 0 ? 'green' : 'red' }}>
+              <td data-label="mFRR (€)" style={{ color: entry.profit >= 0 ? 'green' : 'red' }}>
                 {entry.profit === null ? '-' : `${entry.profit.toFixed(2)} €`}
               </td>
               <td data-label="Net (€)" style={{ color: entry.net_total >= 0 ? 'green' : 'red' }}>
@@ -396,7 +396,7 @@ function App() {
                   ? `${(entry.price_per_kwh * 1000).toFixed(2)}`
                   : '-'}
               </td>
-              <td data-label="MFFR (€/MWh)">{entry.mffr_price === null ? '-' : entry.mffr_price}</td>
+              <td data-label="mFRR (€/MWh)">{entry.mffr_price === null ? '-' : entry.mffr_price}</td>
               <td data-label="NPS (€/MWh)">{entry.nordpool_price === null ? '-' : (entry.nordpool_price * 1000).toFixed(2)}</td>
               <td data-label="Baseline (W)">{formatW(entry.baseline_w)}</td>
               <td data-label="Start">
