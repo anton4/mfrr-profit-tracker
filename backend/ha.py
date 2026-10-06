@@ -79,23 +79,41 @@ def get_grid_power_w() -> float | None:
 class GridMeter:
     """Net grid energy by integrating the summed phase power between reads (trapezoidal)."""
 
-    # Don't bridge longer gaps (HA unreachable, sensors unavailable) by interpolation
+    # Gaps up to this long are interpolated between the two readings
     MAX_GAP_S = 60
+    # Longer gaps (HA unreachable, sensors unavailable) are bridged only if the power on both
+    # sides is the same within this tolerance: the power is then assumed constant in between
+    BRIDGE_TOLERANCE_W = 100
+    BRIDGE_TOLERANCE_PCT = 3
 
     def __init__(self):
         self._prev = None   # (power_w, datetime)
 
-    def read(self, now):
+    def _steady(self, a: float, b: float) -> bool:
+        tolerance = max(self.BRIDGE_TOLERANCE_W, max(abs(a), abs(b)) * self.BRIDGE_TOLERANCE_PCT / 100.0)
+        return abs(a - b) <= tolerance
+
+    def read(self, now, slot_start=None):
         """(net_kwh, seconds) since the previous successful read; net is +import / −export.
-        Returns None on the first read, a failed read or after a long gap."""
+
+        A bridged long gap is clipped to slot_start so a long outage doesn't pile earlier
+        slots' energy into the current one. Returns None on the first read, a failed read,
+        or a long gap across which the power changed.
+        """
         power_w = get_grid_power_w()
         if power_w is None:
-            return None
+            return None   # keep the last good reading for bridging
         prev, self._prev = self._prev, (power_w, now)
         if prev is None:
             return None
-        seconds = (now - prev[1]).total_seconds()
-        if seconds <= 0 or seconds > self.MAX_GAP_S:
+        start = prev[1]
+        if (now - start).total_seconds() > self.MAX_GAP_S:
+            if not self._steady(prev[0], power_w):
+                return None
+            if slot_start is not None and start < slot_start:
+                start = slot_start
+        seconds = (now - start).total_seconds()
+        if seconds <= 0:
             return None
         return (prev[0] + power_w) / 2.0 * seconds / 3_600_000.0, seconds
 

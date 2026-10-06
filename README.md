@@ -58,7 +58,13 @@ KRATT_SHARE=0.20
 **Baseline & mFRR energy**
 --------------------------
 
-Every 10 seconds the tracker reads all phase powers and sums them into **net grid power** (+import / −export). It integrates that power over the actual time since the previous read (trapezoidal). Summing signed phase powers mimics a phase-summing utility meter, so one phase importing while another exports is not counted as both. Gaps longer than 60 s, e.g. when Home Assistant is unreachable or a sensor is unavailable, are skipped rather than interpolated.
+Every 10 seconds the tracker reads all phase powers and sums them into **net grid power** (+import / −export). It integrates that power over the actual time since the previous read (trapezoidal). Summing signed phase powers mimics a phase-summing utility meter, so one phase importing while another exports is not counted as both. Missing readings, e.g. when Home Assistant is unreachable or a sensor is unavailable, are handled like this:
+
+-   Gaps up to 60 s are interpolated between the readings on either side.
+
+-   Longer gaps are filled only if the power is the same on both sides (within 100 W or 3%, whichever is larger). The power is then assumed constant for the whole gap. A filled gap is cut off at the start of the current 15-minute slot, so energy from earlier slots isn't added to it.
+
+-   Longer gaps where the power changed are skipped, because it's unknown when the change happened.
 
 `baseline.py` averages the net grid power over each 15-minute slot that had no mFRR command. That average is the baseline. A slot only counts if readings covered at least 12 minutes of it.
 

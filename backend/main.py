@@ -108,7 +108,7 @@ def write_current_timeslot():
     slot_end_time = timeslot + timedelta(minutes=15)
 
     # Read the meter every tick so the next interval only covers the last ~10 s
-    reading = grid_meter.read(now)
+    reading = grid_meter.read(now, slot_start=timeslot)
     signal = get_signal()
 
     if signal != last_logged_signal:
