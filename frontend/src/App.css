@@ -360,3 +360,4 @@ button { font: inherit; }
 .act-card-total .act-card-head { padding-bottom: 6px; font-weight: 600; }
 .act-row > div:nth-child(12), .act-total > div:nth-child(12) { font-size: 12px; white-space: nowrap; }
 .act-head .hint { gap: 3px; }
+.kpi-compare { padding: 4px 8px; margin: 2px 0; border-radius: 8px; background: var(--surface-2); align-self: flex-start; }
