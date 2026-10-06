@@ -84,6 +84,16 @@ def get_mffr_data(
     # One row per slot and direction, keyed by id ("<timeslot>_<signal>")
     return {row["id"]: row for row in rows}
 
+@app.get("/api/price-sync")
+def get_price_sync():
+    """Status of the mFRR price sync from the Baltic Transparency Dashboard."""
+    job = mffr_price_updater.scheduler.get_job("mffr_prices")
+    next_run = job.next_run_time if job else None
+    return {
+        **mffr_price_updater.sync_status,
+        "next_sync_at": next_run.astimezone(LOCAL_TZ).isoformat() if next_run else None,
+    }
+
 @app.on_event("startup")
 def start_all_schedulers():
     print("✅ Starting all schedulers from FastAPI")

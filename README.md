@@ -109,12 +109,14 @@ The value of the energy stored in or taken from the battery isn't counted. DOWN 
 
 Set `MFRR_PRICE_AREA` (`Estonia` / `Latvia` / `Lithuania`) to use another bidding zone.
 
+The sync runs every minute and always checks the last 3 hours, so the latest published price is known even when no slot is waiting. The UI shows the last sync (and any error), the next sync, and the newest slot with published prices. The same information is available at `/api/price-sync`.
+
 * * * * *
 
 **Code layout**
 ---------------
 
--   backend/api.py: FastAPI app. Serves `/api/mffr` and the built UI, and starts all schedulers.
+-   backend/api.py: FastAPI app. Serves `/api/mffr`, `/api/price-sync` and the built UI, and starts all schedulers.
 
 -   backend/ha.py: Home Assistant access and Kratt signal detection.
 

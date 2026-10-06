@@ -15,6 +15,21 @@ scheduler = BackgroundScheduler()
 BTD_URL = "https://api-baltic.transparency-dashboard.eu/api/v1/export"
 PRICE_AREA = os.getenv("MFRR_PRICE_AREA", "Estonia")
 MAX_LOOKBACK = timedelta(days=7)
+# Always look this far back, so the latest published price is known even with nothing pending
+STATUS_LOOKBACK = timedelta(hours=3)
+
+# Last sync result, served by /api/price-sync
+sync_status = {
+    "source": "Baltic Transparency Dashboard",
+    "area": PRICE_AREA,
+    "last_sync_at": None,         # last attempt
+    "last_success_at": None,
+    "last_error": None,
+    "latest_price_slot": None,    # start of the newest slot with a published price
+    "latest_up_price": None,      # €/MWh
+    "latest_down_price": None,    # €/MWh
+    "pending_slots": 0,           # recorded slots still waiting for a price
+}
 
 # Ensure log folder exists
 os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
@@ -64,26 +79,38 @@ def fetch_and_update_mffr_prices():
     db = sqlite_utils.Database(DB_PATH)
     updated = 0
 
-    if "slots" not in db.table_names():
-        return
-
     now = datetime.now(tz)
-    pending = list(db["slots"].rows_where(
-        "mffr_price IS NULL AND timeslot >= ?",
-        [(now - MAX_LOOKBACK).isoformat()],
-        order_by="timeslot",
-    ))
-    if not pending:
-        return
+    pending = []
+    if "slots" in db.table_names():
+        pending = list(db["slots"].rows_where(
+            "mffr_price IS NULL AND timeslot >= ?",
+            [(now - MAX_LOOKBACK).isoformat()],
+            order_by="timeslot",
+        ))
 
+    window_start = now - STATUS_LOOKBACK
+    if pending:
+        window_start = min(window_start, datetime.fromisoformat(pending[0]["timeslot"]))
+
+    sync_status["last_sync_at"] = now.isoformat()
     try:
-        window_start = datetime.fromisoformat(pending[0]["timeslot"])
         api_data = fetch_btd_prices(window_start, now)
     except Exception as e:
         msg = f"❌ Failed to fetch mFRR prices: {e}"
+        sync_status["last_error"] = str(e)
+        sync_status["pending_slots"] = len(pending)
         print(msg)
         log_error(msg)
         return
+
+    sync_status["last_success_at"] = now.isoformat()
+    sync_status["last_error"] = None
+    published = [slot for slot, p in api_data.items() if p["UP"] is not None or p["DOWN"] is not None]
+    if published:
+        latest = max(published)
+        sync_status["latest_price_slot"] = latest.astimezone(tz).isoformat()
+        sync_status["latest_up_price"] = api_data[latest]["UP"]
+        sync_status["latest_down_price"] = api_data[latest]["DOWN"]
 
     for row in pending:
         try:
@@ -103,13 +130,15 @@ def fetch_and_update_mffr_prices():
             print(msg)
             log_error(msg)
 
+    sync_status["pending_slots"] = len(pending) - updated
     if updated:
         print(f"✅ Updated {updated} mFRR prices in SQLite DB.")
-    print(f"⏱️ Completed in {time.time() - start_time:.2f} seconds.")
+        print(f"⏱️ Completed in {time.time() - start_time:.2f} seconds.")
 
 scheduler.add_job(
     fetch_and_update_mffr_prices,
     "interval",
+    id="mffr_prices",
     minutes=1,
     max_instances=1,
     coalesce=True

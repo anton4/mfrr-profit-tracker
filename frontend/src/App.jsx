@@ -10,6 +10,44 @@ function App() {
   const [filter, setFilter] = useState('today');
   const [customRange, setCustomRange] = useState({ from: '', to: '' });
   const [loading, setLoading] = useState(false);
+  const [priceSync, setPriceSync] = useState(null);
+  const [clock, setClock] = useState(Date.now());
+
+  // mFRR price sync status (Baltic Transparency Dashboard), refreshed every 30 s
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/price-sync`);
+        if (res.ok) setPriceSync(await res.json());
+      } catch (e) {
+        console.error('Price sync status fetch failed', e);
+      }
+    };
+    load();
+    const poll = setInterval(load, 30000);
+    const tick = setInterval(() => setClock(Date.now()), 1000);
+    return () => { clearInterval(poll); clearInterval(tick); };
+  }, []);
+
+  const fmtTime = (iso) =>
+    iso ? new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) : '-';
+  const fmtSlot = (iso) => {
+    if (!iso) return '-';
+    const start = new Date(iso);
+    const end = new Date(start.getTime() + 15 * 60000);
+    const hm = (d) => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+    return `${start.toLocaleDateString('et-EE')} ${hm(start)}–${hm(end)}`;
+  };
+  const fmtAgo = (iso) => {
+    if (!iso) return '';
+    const min = Math.round((clock - new Date(iso).getTime()) / 60000);
+    return min < 1 ? '(just now)' : min < 120 ? `(${min} min ago)` : `(${Math.round(min / 60)} h ago)`;
+  };
+  const fmtIn = (iso) => {
+    if (!iso) return '';
+    const sec = Math.max(0, Math.round((new Date(iso).getTime() - clock) / 1000));
+    return `(in ${sec} s)`;
+  };
 
   const safeFixed = (val, digits = 3, suffix = '€') =>
     typeof val === 'number' ? `${val.toFixed(digits)} ${suffix}` : '-';
@@ -231,6 +269,41 @@ function App() {
   return (
     <div className={darkMode ? 'dark' : 'light'} style={{ padding: '2rem' }}>
       <h1 style={{ fontSize: '2rem', fontWeight: 'bold' }}>mFRR Profit Tracker</h1>
+
+      {priceSync && (
+        <div
+          style={{
+            marginBottom: '1rem',
+            padding: '0.6rem 0.9rem',
+            border: `1px solid ${priceSync.last_error ? '#d33' : '#8884'}`,
+            borderRadius: 6,
+            fontSize: '0.9rem',
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: '0.4rem 1.5rem',
+          }}
+        >
+          <strong>mFRR prices · {priceSync.source} ({priceSync.area})</strong>
+          <span>
+            Last sync: {fmtTime(priceSync.last_sync_at)} {fmtAgo(priceSync.last_sync_at)}{' '}
+            {priceSync.last_sync_at && (priceSync.last_error ? <span style={{ color: '#d33' }}>✗ failed</span> : <span style={{ color: 'green' }}>✓</span>)}
+          </span>
+          <span>Next sync: {fmtTime(priceSync.next_sync_at)} {fmtIn(priceSync.next_sync_at)}</span>
+          <span>
+            Latest price data: {fmtSlot(priceSync.latest_price_slot)} {fmtAgo(priceSync.latest_price_slot)}
+            {priceSync.latest_price_slot && (
+              <> · UP {priceSync.latest_up_price ?? '-'} / DOWN {priceSync.latest_down_price ?? '-'} €/MWh</>
+            )}
+          </span>
+          {priceSync.pending_slots > 0 && <span>Waiting for prices: {priceSync.pending_slots} slot(s)</span>}
+          {priceSync.last_error && (
+            <span style={{ color: '#d33', flexBasis: '100%' }}>
+              Error: {priceSync.last_error}
+              {priceSync.last_success_at && ` (last successful sync ${fmtTime(priceSync.last_success_at)})`}
+            </span>
+          )}
+        </div>
+      )}
 
       <div style={{ marginBottom: '1rem' }}>
         <label>Filter:&nbsp;</label>
