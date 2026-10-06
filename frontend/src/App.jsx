@@ -5,9 +5,29 @@ import './App.css';
 const API_BASE = ""; // same origin: the backend serves this UI (vite dev proxies /api)
 
 function App() {
-  const [darkMode, setDarkMode] = useState(false);
+  const [darkMode, setDarkModeState] = useState(() => {
+    try {
+      const saved = localStorage.getItem('theme');
+      if (saved) return saved === 'dark';
+    } catch { /* storage unavailable */ }
+    return window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false;
+  });
+  const setDarkMode = (dark) => {
+    setDarkModeState(dark);
+    try { localStorage.setItem('theme', dark ? 'dark' : 'light'); } catch { /* storage unavailable */ }
+  };
   const [data, setData] = useState([]);
-  const [filter, setFilter] = useState('today');
+  // Period: from ?range=… (shareable links), else today
+  const [filter, setFilterState] = useState(() => {
+    const range = new URLSearchParams(window.location.search).get('range');
+    return ['today', 'yesterday', 'this_week', 'last_week', 'this_month', 'last_month', 'all', 'custom'].includes(range) ? range : 'today';
+  });
+  const setFilter = (value) => {
+    setFilterState(value);
+    const url = new URL(window.location.href);
+    url.searchParams.set('range', value);
+    window.history.replaceState(null, '', url);
+  };
   const [customRange, setCustomRange] = useState({ from: '', to: '' });
   const [loading, setLoading] = useState(false);
   const [priceSync, setPriceSync] = useState(null);
@@ -23,7 +43,6 @@ function App() {
     d.setMinutes(Math.floor(d.getMinutes() / 15) * 15, 0, 0);
     return d;
   };
-  const [backfillOpen, setBackfillOpen] = useState(false);
   const [backfillRange, setBackfillRange] = useState(() => {
     const to = currentSlotStart();
     return { from: toLocalInput(new Date(to.getTime() - 24 * 3600000)), to: toLocalInput(to) };
@@ -126,9 +145,6 @@ function App() {
     return `(in ${sec} s)`;
   };
 
-  const safeFixed = (val, digits = 3, suffix = '€') =>
-    typeof val === 'number' ? `${val.toFixed(digits)} ${suffix}` : '-';
-  const formatW = (v) => (typeof v === 'number' ? `${Math.round(v)} W` : '-');
 
   const now = new Date();
   const startOf = (unit) => {
@@ -363,368 +379,412 @@ function App() {
     return new Map([...best].map(([k, v]) => [k, v.id]));
   }, [data]);
 
-  const formatVal = (val, digits = 2) => (val ? val.toFixed(digits) : '-');
-  const percent = (count, total) => (total ? `${Math.round((count / total) * 100)}%` : '-');
+  const fmtNum = (v, digits = 2) => (typeof v === 'number' ? v.toFixed(digits) : '–');
+  const fmtEur = (v, digits = 2) => {
+    if (typeof v !== 'number') return '–';
+    const r = Number(v.toFixed(digits));
+    return `${r > 0 ? '+' : r < 0 ? '−' : ''}${Math.abs(r).toFixed(digits)} €`;
+  };
+  const signClass = (v) => {
+    const r = typeof v === 'number' ? Number(v.toFixed(2)) : 0;
+    return r > 0 ? 'pos' : r < 0 ? 'neg' : 'zero';
+  };
+  const percent = (count, total) => (total ? `${Math.round((count / total) * 100)}%` : '–');
   const formatDuration = (minutes) => {
-    if (!minutes) return '-';
+    if (!minutes) return '–';
     const h = Math.floor(minutes / 60);
-    const m = minutes % 60;
-    return `${h}h ${m}min`;
+    const m = String(minutes % 60).padStart(2, '0');
+    return h ? `${h} h ${m} m` : `${minutes % 60} m`;
+  };
+  const hm = (iso) => (iso ? new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : '–');
+  const marketLabel = (m) => (m === 'AFRR' ? 'aFRR' : m === 'MFRR' ? 'mFRR' : '–');
+  const isRamp = (e) => Boolean(e.id?.endsWith('_r'));
+
+  // Delivery over all rows with a request: delivered / requested energy
+  const delivery = useMemo(() => {
+    let e = 0;
+    let r = 0;
+    for (const row of data) {
+      if ((row.requested_kwh || 0) > 0) { e += row.energy_kwh || 0; r += row.requested_kwh; }
+    }
+    return r > 0 ? Math.round((e / r) * 100) : null;
+  }, [data]);
+
+  const [openRow, setOpenRow] = useState(null);
+  const officialFor = (entry) => {
+    const key = `${entry.timeslot}|${entry.signal}`;
+    return officialRowId.get(key) === entry.id ? official.get(key) : undefined;
+  };
+  const kratt = (entry) => {
+    const o = officialFor(entry);
+    return o ? `${fmtNum(o.kwh)} · ${o.share.toFixed(2)} €` : '–';
   };
 
+  const ranges = [
+    ['today', 'Today'], ['yesterday', 'Yesterday'], ['this_week', 'This week'], ['last_week', 'Last week'],
+    ['this_month', 'This month'], ['last_month', 'Last month'], ['all', 'All'], ['custom', 'Custom'],
+  ];
+  const rangeLabel = Object.fromEntries(ranges)[filter] ?? '';
+  const hasReport = qwReport.length > 0;
   const signalSplit = {
     up: percent(summary.up.count, summary.total.count),
     down: percent(summary.down.count, summary.total.count),
   };
+  const energySplit = summary.total.energy ? (summary.down.energy / summary.total.energy) * 100 : 50;
+  const directionRows = [
+    ['DOWN', summary.down, signalSplit.down],
+    ['UP', summary.up, signalSplit.up],
+  ];
 
   return (
-    <div className={darkMode ? 'dark' : 'light'} style={{ padding: '2rem' }}>
-      <h1 style={{ fontSize: '2rem', fontWeight: 'bold' }}>mFRR Profit Tracker</h1>
-
-      {priceSync && (
-        <div
-          style={{
-            marginBottom: '1rem',
-            padding: '0.6rem 0.9rem',
-            border: `1px solid ${priceSync.last_error ? '#d33' : '#8884'}`,
-            borderRadius: 6,
-            fontSize: '0.9rem',
-            display: 'flex',
-            flexWrap: 'wrap',
-            gap: '0.4rem 1.5rem',
-          }}
-        >
-          <strong>mFRR prices · {priceSync.source} ({priceSync.area})</strong>
-          <span>
-            Last sync: {priceSync.last_sync_at ? `${fmtTime(priceSync.last_sync_at)} ${fmtAgo(priceSync.last_sync_at)}` : 'never'}{' '}
-            {priceSync.last_sync_at && (priceSync.last_error ? <span style={{ color: '#d33' }}>✗ failed</span> : <span style={{ color: 'green' }}>✓</span>)}
-          </span>
-          <span title="The dashboard is only queried when a finished mFRR slot is missing its price">
-            Next sync:{' '}
-            {priceSync.next_sync_at
-              ? `${fmtTime(priceSync.next_sync_at)} ${fmtIn(priceSync.next_sync_at)}`
-              : 'not needed (no slots waiting for a price)'}
-          </span>
-          <span>
-            Latest price data:{' '}
-            {priceSync.latest_price_slot ? `${fmtSlot(priceSync.latest_price_slot)} ${fmtAgo(priceSync.latest_price_slot)}` : '-'}
-            {priceSync.latest_price_slot && (
-              <> · UP {priceSync.latest_up_price ?? '-'} / DOWN {priceSync.latest_down_price ?? '-'} €/MWh</>
-            )}
-          </span>
-          {priceSync.pending_slots > 0 && <span>Waiting for prices: {priceSync.pending_slots} slot(s)</span>}
-          <span title="aFRR energy prices are estimated until Volton publishes the aFRR clearing price">
-            aFRR: {priceSync.afrr_estimated_slots > 0 ? `${priceSync.afrr_estimated_slots} slot(s) estimated` : 'no estimated slots'}
-            {priceSync.afrr_last_check_at && ` · Volton checked ${fmtTime(priceSync.afrr_last_check_at)}`}
-            {priceSync.afrr_last_error && <span style={{ color: '#d33' }}> ✗ {priceSync.afrr_last_error}</span>}
-          </span>
-          {priceSync.last_error && (
-            <span style={{ color: '#d33', flexBasis: '100%' }}>
-              Error: {priceSync.last_error}
-              {priceSync.last_success_at && ` (last successful sync ${fmtTime(priceSync.last_success_at)})`}
-            </span>
-          )}
-        </div>
-      )}
-
-      <div style={{ marginBottom: '1rem', padding: '0.6rem 0.9rem', border: '1px solid #8884', borderRadius: 6, fontSize: '0.9rem' }}>
-        <button
-          type="button"
-          onClick={() => setBackfillOpen((o) => !o)}
-          style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontWeight: 'bold', color: 'inherit', fontSize: 'inherit' }}
-        >
-          {backfillOpen ? '▾' : '▸'} Backfill from Home Assistant · Import Qilowatt report
-          {backfillRunning && ` · running ${backfill.progress}%`}
-        </button>
-        {backfillOpen && (
-          <div style={{ marginTop: '0.6rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
-              <label>
-                From&nbsp;
-                <input
-                  type="datetime-local"
-                  value={backfillRange.from}
-                  onChange={(e) => setBackfillRange({ ...backfillRange, from: e.target.value })}
-                  disabled={backfillRunning}
-                />
-              </label>
-              <label>
-                To&nbsp;
-                <input
-                  type="datetime-local"
-                  value={backfillRange.to}
-                  max={toLocalInput(currentSlotStart())}
-                  onChange={(e) => setBackfillRange({ ...backfillRange, to: e.target.value })}
-                  disabled={backfillRunning}
-                />
-              </label>
-              <button type="button" onClick={startBackfill} disabled={backfillRunning || !backfillRange.from || !backfillRange.to}>
-                {backfillRunning ? 'Backfilling…' : 'Backfill'}
-              </button>
+    <div className={darkMode ? 'app dark' : 'app'}>
+      <div className="page">
+        <header className="topbar">
+          <div className="brand">
+            <div className="brand-mark" aria-hidden="true">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M13 2 4 14h7l-1 8 9-12h-7z" /></svg>
             </div>
-            <div style={{ opacity: 0.75 }}>
-              Replays Home Assistant history through the tracker. Existing rows in the range are recomputed.
-              The range is rounded to 15-minute slots and stops at the current slot. Home Assistant keeps
-              history for <code>purge_keep_days</code> (10 days by default).
-            </div>
-            {backfillRunning && (
-              <div>
-                <progress value={backfill.progress} max={100} style={{ width: '100%', maxWidth: 400 }} />{' '}
-                {backfill.phase} · {backfill.progress}%
-              </div>
-            )}
-            {backfill && backfill.state === 'done' && (
-              <div style={{ color: 'green' }}>
-                ✓ {backfill.message} ({fmtSlot(backfill.from).split('–')[0]} → {fmtSlot(backfill.to).split('–')[0]})
-              </div>
-            )}
-            {backfill && backfill.state === 'error' && <div style={{ color: '#d33' }}>✗ {backfill.message}</div>}
-            {backfillError && <div style={{ color: '#d33' }}>✗ {backfillError}</div>}
-            <div style={{ borderTop: '1px solid #8884', paddingTop: '0.5rem', marginTop: '0.25rem' }}>
-              <label>
-                <strong>Import Qilowatt report</strong> (balancing revenue and/or signals CSV)&nbsp;
-                <input type="file" accept=".csv,text/csv" multiple onChange={(e) => { importQwReports([...e.target.files]); e.target.value = ''; }} />
-              </label>
-              <div style={{ opacity: 0.75 }}>
-                Official per-slot energy and revenue are shown next to the tracker&apos;s figures (Kratt kWh / Kratt €).
-                A signals report also corrects the mFRR/aFRR market of matching rows.
-              </div>
-              {qwImport && qwImport.map((line) => (
-                <div key={line} style={{ color: line.startsWith('✓') ? 'green' : '#d33' }}>{line}</div>
-              ))}
+            <div>
+              <h1>mFRR Profit Tracker</h1>
+              <div className="muted small">Kratt · Estonia · grid-side metering</div>
             </div>
           </div>
-        )}
-      </div>
+          <div className="toolbar">
+            <div className="seg" role="group" aria-label="Period">
+              {ranges.map(([value, label]) => (
+                <button key={value} type="button" className={filter === value ? 'on' : ''} aria-pressed={filter === value} onClick={() => setFilter(value)}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <button type="button" className="iconbtn" aria-label={darkMode ? 'Switch to light mode' : 'Switch to dark mode'} onClick={() => setDarkMode(!darkMode)}>
+              {darkMode ? (
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></svg>
+              ) : (
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" /></svg>
+              )}
+            </button>
+          </div>
+        </header>
 
-      <div style={{ marginBottom: '1rem' }}>
-        <label>Filter:&nbsp;</label>
-        <select value={filter} onChange={(e) => setFilter(e.target.value)}>
-          <option value="all">All (latest)</option>
-          <option value="today">Today</option>
-          <option value="yesterday">Yesterday</option>
-          <option value="this_week">This Week</option>
-          <option value="last_week">Last Week</option>
-          <option value="this_month">This Month</option>
-          <option value="last_month">Last Month</option>
-          <option value="custom">Custom Range</option>
-        </select>
         {filter === 'custom' && (
-          <>
-            <input
-              type="date"
-              value={customRange.from}
-              onChange={(e) => setCustomRange({ ...customRange, from: e.target.value })}
-              style={{ marginLeft: '1rem' }}
-            />
-            <input
-              type="date"
-              value={customRange.to}
-              onChange={(e) => setCustomRange({ ...customRange, to: e.target.value })}
-              style={{ marginLeft: '0.5rem' }}
-            />
-          </>
+          <div className="custom-range">
+            <label className="field">From<input type="date" value={customRange.from} onChange={(e) => setCustomRange({ ...customRange, from: e.target.value })} /></label>
+            <label className="field">To<input type="date" value={customRange.to} onChange={(e) => setCustomRange({ ...customRange, to: e.target.value })} /></label>
+          </div>
         )}
 
-        <button
-          onClick={() => setDarkMode(!darkMode)}
-          style={{
-            marginLeft: '1rem',
-            padding: '0.25rem 0.5rem',
-            backgroundColor: darkMode ? '#eee' : '#333',
-            color: darkMode ? '#000' : '#fff',
-            border: '1px solid #888',
-            borderRadius: '4px',
-            cursor: 'pointer'
-          }}
-        >
-          {darkMode ? 'Light Mode' : 'Dark Mode'}
-        </button>
-      </div>
+        {priceSync && (
+          <div className="chips">
+            <div className={`chip ${priceSync.last_error ? 'chip-error' : ''}`} title="The dashboard is only queried when a finished mFRR slot is missing its price">
+              <span className={`dot ${priceSync.last_error ? 'dot-neg' : priceSync.next_sync_at ? 'dot-warn' : 'dot-pos'}`} />
+              <strong>mFRR prices</strong>
+              <span className="muted">
+                {priceSync.source}
+                {' · '}
+                {priceSync.last_sync_at ? `synced ${hm(priceSync.last_sync_at)} ${fmtAgo(priceSync.last_sync_at)}` : 'not synced yet'}
+                {' · '}
+                {priceSync.next_sync_at ? `next ${fmtTime(priceSync.next_sync_at)} ${fmtIn(priceSync.next_sync_at)}` : 'next: not needed'}
+              </span>
+            </div>
+            {priceSync.latest_price_slot && (
+              <div className="chip">
+                <strong>Latest price</strong>
+                <span className="muted num">
+                  {fmtSlot(priceSync.latest_price_slot)} · UP {priceSync.latest_up_price ?? '–'} · DOWN {priceSync.latest_down_price ?? '–'} €/MWh
+                </span>
+              </div>
+            )}
+            {priceSync.pending_slots > 0 && (
+              <div className="chip"><strong>Waiting for prices</strong><span className="muted num">{priceSync.pending_slots} slot(s)</span></div>
+            )}
+            <div className={`chip ${priceSync.afrr_estimated_slots > 0 ? 'chip-warn' : ''}`} title="aFRR energy prices are estimated until Volton publishes the aFRR clearing price">
+              {priceSync.afrr_estimated_slots > 0 && <span className="dot dot-warn" />}
+              <strong>aFRR</strong>
+              <span>
+                {priceSync.afrr_estimated_slots > 0 ? `${priceSync.afrr_estimated_slots} slot(s) estimated` : 'no estimated prices'}
+                {priceSync.afrr_last_check_at && ` · Volton checked ${hm(priceSync.afrr_last_check_at)}`}
+              </span>
+            </div>
+            {(priceSync.last_error || priceSync.afrr_last_error) && (
+              <div className="chip chip-error">
+                <strong>Error</strong>
+                <span>
+                  {priceSync.last_error || priceSync.afrr_last_error}
+                  {priceSync.last_success_at && ` (last successful sync ${fmtTime(priceSync.last_success_at)})`}
+                </span>
+              </div>
+            )}
+          </div>
+        )}
 
-      {loading && <div style={{ marginBottom: '1rem' }}>Loading…</div>}
+        <div className="kpis">
+          <div className="card kpi">
+            <div className="muted small">Net result</div>
+            <div className={`kpi-value num ${signClass(summary.total.net)}`}>{fmtEur(summary.total.net)}</div>
+            <div className="muted small">
+              Activation <span className="num">{fmtEur(summary.total.profit)}</span> · Bill effect <span className="num">{fmtEur(-summary.total.grid)}</span>
+            </div>
+          </div>
+          <div className="card kpi">
+            <div className="muted small">{hasReport ? 'Activation share · ours vs Kratt' : 'Activation share'}</div>
+            <div className="kpi-row">
+              <span className="kpi-value num">{fmtNum(summary.total.profit)} €</span>
+              {hasReport && <span className="kpi-sub num muted">/ {fmtNum(officialTotal.share)} €</span>}
+            </div>
+            <div className="muted small">
+              {hasReport ? (
+                <>
+                  <span className="num text">{fmtEur(summary.total.profit - officialTotal.share)}</span>
+                  {officialTotal.share ? ` (${(((summary.total.profit - officialTotal.share) / officialTotal.share) * 100).toFixed(1)}%)` : ''} vs imported Qilowatt report
+                </>
+              ) : 'Import a Qilowatt report to compare'}
+            </div>
+          </div>
+          <div className="card kpi">
+            <div className="muted small">Regulated energy</div>
+            <div className="kpi-value num">{fmtNum(summary.total.energy)} kWh</div>
+            <div className="splitbar" aria-hidden="true">
+              <div style={{ width: `${energySplit}%`, background: 'var(--down)' }} />
+              <div style={{ width: `${100 - energySplit}%`, background: 'var(--up)' }} />
+            </div>
+            <div className="split-legend small">
+              <span className="down-text">DOWN <span className="num">{fmtNum(summary.down.energy)}</span></span>
+              <span className="up-text">UP <span className="num">{fmtNum(summary.up.energy)}</span></span>
+            </div>
+          </div>
+          <div className="card kpi">
+            <div className="muted small">Activations</div>
+            <div className="kpi-value num">{summary.total.count}</div>
+            <div className="muted small">
+              <span className="num">{formatDuration(summary.total.duration)}</span> in total
+              {delivery !== null && <> · avg delivery <span className="num text">{delivery}%</span></>}
+            </div>
+          </div>
+        </div>
 
-      <h2 style={{ marginTop: '2rem' }}>
-        Summary <span style={{ fontSize: '0.8rem', fontWeight: 'normal' }}>({filter.replaceAll('_', ' ')})</span>
-      </h2>
+        <div className="split-row">
+          <section className="card section direction">
+            <div className="section-head">
+              <h2>By direction</h2>
+              <span className="muted small">{rangeLabel}</span>
+            </div>
+            <div className="scroll-x">
+              <div className="dir-grid">
+                <div className="th" />
+                <div className="th r">Split</div>
+                <div className="th r">Count</div>
+                <div className="th r">Duration</div>
+                <div className="th r">Energy</div>
+                <div className="th r">Activation</div>
+                <div className="th r">Net</div>
+                <div className="th r">Avg €/MWh</div>
+                <div className="th r">Backup</div>
+                <div className="th r">Cancelled</div>
+                {directionRows.map(([dir, b, split]) => (
+                  <div className="dir-row" key={dir}>
+                    <div><span className={`pill pill-${dir}`}>{dir}</span></div>
+                    <div className="num r">{split}</div>
+                    <div className="num r">{b.count}</div>
+                    <div className="num r">{formatDuration(b.duration)}</div>
+                    <div className="num r">{fmtNum(b.energy)} kWh</div>
+                    <div className={`num r ${signClass(b.profit)}`}>{fmtEur(b.profit)}</div>
+                    <div className={`num r ${signClass(b.net)}`}>{fmtEur(b.net)}</div>
+                    <div className="num r">{b.energy ? Math.round((b.net / b.energy) * 1000) : '–'}</div>
+                    <div className="num r muted">{percent(b.backup, b.count)}</div>
+                    <div className="num r muted">{percent(b.cancelled, b.count)}</div>
+                  </div>
+                ))}
+                <div className="dir-row total">
+                  <div>Total</div>
+                  <div className="num r" />
+                  <div className="num r">{summary.total.count}</div>
+                  <div className="num r">{formatDuration(summary.total.duration)}</div>
+                  <div className="num r">{fmtNum(summary.total.energy)} kWh</div>
+                  <div className={`num r ${signClass(summary.total.profit)}`}>{fmtEur(summary.total.profit)}</div>
+                  <div className={`num r ${signClass(summary.total.net)}`}>{fmtEur(summary.total.net)}</div>
+                  <div className="num r">{summary.total.energy ? Math.round((summary.total.net / summary.total.energy) * 1000) : '–'}</div>
+                  <div className="num r muted">{percent(summary.total.backup, summary.total.count)}</div>
+                  <div className="num r muted">{percent(summary.total.cancelled, summary.total.count)}</div>
+                </div>
+                {hasReport && (
+                  <div className="dir-row report">
+                    <div>Kratt report</div>
+                    <div /><div /><div />
+                    <div className="num r">{fmtNum(officialTotal.kwh)} kWh</div>
+                    <div className="num r">{fmtNum(officialTotal.share)} €</div>
+                    <div /><div /><div /><div />
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
 
-      {/* Summary table unchanged */}
-      <table style={{ width: '100%', marginTop: '1rem', borderCollapse: 'collapse' }}>
-        <thead>
-          <tr style={{ textAlign: 'left', borderBottom: '2px solid #ddd' }}>
-            <th></th>
-            <th>Split</th>
-            <th>Count</th>
-            <th>Duration</th>
-            <th>Energy (kWh)</th>
-            <th>Grid (kWh)</th>
-            <th>Activation</th>
-            <th>NPS</th>
-            <th>Net</th>
-            <th>Average</th>
-            <th>Backup %</th>
-            <th>Cancelled %</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td><strong>DOWN</strong></td>
-            <td data-label="Signal Split">{signalSplit.down}</td>
-            <td data-label="Count">{summary.down.count}</td>
-            <td data-label="Duration">{formatDuration(summary.down.duration)}</td>
-            <td data-label="mFRR (kWh)">{formatVal(summary.down.energy)} kWh</td>
-            <td data-label="Grid">{formatVal(summary.down.grid_energy)} kWh</td>
-            <td data-label="mFRR" style={{ color: summary.down.profit >= 0 ? 'green' : 'red' }}>{formatVal(summary.down.profit, 2)} €</td>
-            <td data-label="NPS" style={{ color: summary.down.grid * -1 >= 0 ? 'green' : 'red' }}>{formatVal(summary.down.grid * -1, 2)} €</td>
-            <td data-label="Net" style={{ color: summary.down.net >= 0 ? 'green' : 'red' }}>{formatVal(summary.down.net, 2)} €</td>
-            <td data-label="Average" style={{ color: summary.down.net >= 0 ? 'green' : 'red' }}>
-              {summary.down.grid_energy ? Math.round(summary.down.net / summary.down.grid_energy * 1000) : '-'} €/MWh
-            </td>
-            <td data-label="Backup (%)"> {percent(summary.down.backup, summary.down.count)}</td>
-            <td data-label="Cancelled (%)"> {percent(summary.down.cancelled, summary.down.count)}</td>
-          </tr>
-          <tr>
-            <td><strong>UP</strong></td>
-            <td data-label="Signal Split">{signalSplit.up}</td>
-            <td data-label="Count">{summary.up.count}</td>
-            <td data-label="Duration">{formatDuration(summary.up.duration)}</td>
-            <td data-label="mFRR (kWh)">{formatVal(summary.up.energy)} kWh</td>
-            <td data-label="Grid">{formatVal(summary.up.grid_energy)} kWh</td>
-            <td data-label="mFRR" style={{ color: summary.up.profit >= 0 ? 'green' : 'red' }}>{formatVal(summary.up.profit, 2)} €</td>
-            <td data-label="NPS" style={{ color: summary.up.grid * -1 >= 0 ? 'green' : 'red' }}>{formatVal(summary.up.grid * -1, 2)} €</td>
-            <td data-label="Net" style={{ color: summary.up.net >= 0 ? 'green' : 'red' }}>{formatVal(summary.up.net, 2)} €</td>
-            <td data-label="Average" style={{ color: summary.up.net >= 0 ? 'green' : 'red' }}>
-              {summary.up.energy ? Math.round(summary.up.net / summary.up.energy * 1000) : '-'} €/MWh
-            </td>
-            <td data-label="Backup (%)"> {percent(summary.up.backup, summary.up.count)}</td>
-            <td data-label="Cancelled (%)"> {percent(summary.up.cancelled, summary.up.count)}</td>
-          </tr>
-          <tr>
-            <td><strong>Total</strong></td>
-            <td></td>
-            <td data-label="Count">{summary.total.count}</td>
-            <td data-label="Duration">{formatDuration(summary.total.duration)}</td>
-            <td data-label="mFRR (kWh)">{formatVal(summary.total.energy)} kWh</td>
-            <td data-label="Grid">{formatVal(summary.total.grid_energy)} kWh</td>
-            <td data-label="mFRR" style={{ color: summary.total.profit >= 0 ? 'green' : 'red' }}>{formatVal(summary.total.profit, 2)} €</td>
-            <td data-label="NPS" style={{ color: summary.total.grid * -1 >= 0 ? 'green' : 'red' }}>{formatVal(summary.total.grid * -1, 2)} €</td>
-            <td data-label="Net" style={{ color: summary.total.net >= 0 ? 'green' : 'red' }}>{formatVal(summary.total.net, 2)} €</td>
-            <td></td>
-            <td data-label="Backup (%)"> {percent(summary.total.backup, summary.total.count)}</td>
-            <td data-label="Cancelled (%)"> {percent(summary.total.cancelled, summary.total.count)}</td>
-          </tr>
-          {qwReport.length > 0 && (
-            <tr style={{ fontStyle: 'italic' }}>
-              <td><strong>Kratt report</strong></td>
-              <td colSpan={3} style={{ opacity: 0.75 }}>official, imported Qilowatt revenue report</td>
-              <td data-label="Energy (kWh)">{formatVal(officialTotal.kwh)} kWh</td>
-              <td></td>
-              <td data-label="Activation (official)" style={{ color: officialTotal.share >= 0 ? 'green' : 'red' }}>{formatVal(officialTotal.share, 2)} €</td>
-              <td colSpan={5}></td>
-            </tr>
+          <section className="card section tools">
+            <h2>Data tools</h2>
+            <div className="tool">
+              <div className="tool-title">Backfill from Home Assistant</div>
+              <div className="tool-form">
+                <label className="field">
+                  From
+                  <input type="datetime-local" value={backfillRange.from} disabled={backfillRunning}
+                    onChange={(e) => setBackfillRange({ ...backfillRange, from: e.target.value })} />
+                </label>
+                <label className="field">
+                  To
+                  <input type="datetime-local" value={backfillRange.to} max={toLocalInput(currentSlotStart())} disabled={backfillRunning}
+                    onChange={(e) => setBackfillRange({ ...backfillRange, to: e.target.value })} />
+                </label>
+                <button type="button" className="btn" onClick={startBackfill} disabled={backfillRunning || !backfillRange.from || !backfillRange.to}>
+                  {backfillRunning ? 'Backfilling…' : 'Backfill'}
+                </button>
+              </div>
+              {backfillRunning && (
+                <div className="progress">
+                  <div className="progress-bar"><div style={{ width: `${backfill.progress}%` }} /></div>
+                  <span className="muted small">{backfill.phase} · {backfill.progress}%</span>
+                </div>
+              )}
+              {backfill?.state === 'done' && (
+                <div className="ok small">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg>
+                  {backfill.message} · {fmtSlot(backfill.from).split('–')[0]} → {fmtSlot(backfill.to).split('–')[0]}
+                </div>
+              )}
+              {backfill?.state === 'error' && <div className="err small">{backfill.message}</div>}
+              {backfillError && <div className="err small">{backfillError}</div>}
+              <div className="muted small">
+                Replays Home Assistant history through the tracker; rows in the range are recomputed. History is kept for <code>purge_keep_days</code> (10 days by default).
+              </div>
+            </div>
+            <div className="divider" />
+            <div className="tool">
+              <div className="tool-title">Qilowatt report</div>
+              <label className="btn-ghost">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 16V4M6 10l6-6 6 6M4 20h16" /></svg>
+                Import revenue or signals CSV
+                <input className="visually-hidden" type="file" accept=".csv,text/csv" multiple
+                  onChange={(e) => { importQwReports([...e.target.files]); e.target.value = ''; }} />
+              </label>
+              {qwImport && qwImport.map((line) => (
+                <div key={line} className={`small ${line.startsWith('✓') ? 'ok' : 'err'}`}>{line}</div>
+              ))}
+              <div className="muted small">Official per-slot energy and revenue are shown next to the tracker&apos;s own figures.</div>
+            </div>
+          </section>
+        </div>
+
+        <section className="card activations">
+          <div className="section-head padded">
+            <h2>Activations {loading && <span className="muted small">· loading…</span>}</h2>
+            <div className="legend small muted">
+              <span><span className="badge">↗</span> mFRR ramp minute, priced with the next quarter</span>
+              <span><span className="badge badge-aFRR">est.</span> estimated aFRR price</span>
+            </div>
+          </div>
+
+          {data.length === 0 && !loading && <div className="empty muted">No activations in this period.</div>}
+
+          {data.length > 0 && (
+            <>
+              <div className="scroll-x act-table">
+                <div className="act-inner">
+                  <div className="act-grid act-head">
+                    <div>Slot</div><div>Direction</div><div>Market</div><div className="r">Min</div><div className="r">Energy</div>
+                    <div className="r">Requested</div><div className="pl">Delivery</div><div className="r">Activation</div>
+                    <div className="r">Kratt kWh · €</div><div className="r">Net</div><div className="r">Price €/MWh</div><div />
+                  </div>
+                  {data.map((entry, idx) => {
+                    const id = entry.id ?? String(idx);
+                    const open = openRow === id;
+                    const pct = typeof entry.delivery_pct === 'number' ? Math.round(entry.delivery_pct) : null;
+                    return (
+                      <div className="act-item" key={id}>
+                        <div className="act-grid act-row">
+                          <div className="slot"><span className="num">{entry.slot_date}</span><span className="num muted">{entry.slot_time}</span></div>
+                          <div><span className={`pill pill-${entry.signal}`}>{entry.signal}</span></div>
+                          <div className="badges">
+                            <span className={`badge badge-${marketLabel(entry.market)}`}>{marketLabel(entry.market)}</span>
+                            {isRamp(entry) && <span className="badge" title="mFRR ramp minute, priced with the next quarter">↗</span>}
+                          </div>
+                          <div className="num r">{entry.duration ?? '–'}</div>
+                          <div className="num r">{fmtNum(entry.energy_kwh)}</div>
+                          <div className="num r muted">{fmtNum(entry.requested_kwh)}</div>
+                          <div className="delivery pl">
+                            <div className="meter"><div style={{ width: `${Math.min(pct ?? 0, 100)}%` }} /></div>
+                            <span className="num small">{pct === null ? '–' : `${pct}%`}</span>
+                          </div>
+                          <div className={`num r ${signClass(entry.profit)}`}>{fmtEur(entry.profit)}</div>
+                          <div className="num r muted">{kratt(entry)}</div>
+                          <div className={`num r strong ${signClass(entry.net_total)}`}>{fmtEur(entry.net_total)}</div>
+                          <div className="num r" title={entry.price_source === 'estimate' ? 'aFRR price not published yet: estimate' : entry.price_source || undefined}>
+                            {entry.mffr_price ?? '–'}
+                            {entry.price_source === 'estimate' && <span className="badge badge-aFRR est">est.</span>}
+                          </div>
+                          <div className="r">
+                            <button type="button" className="rowbtn" aria-expanded={open} aria-label="Show details" onClick={() => setOpenRow(open ? null : id)}>
+                              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ transform: open ? 'rotate(180deg)' : undefined }}><path d="m6 9 6 6 6-6" /></svg>
+                            </button>
+                          </div>
+                        </div>
+                        {open && <RowDetails entry={entry} hm={hm} fmtNum={fmtNum} fmtEur={fmtEur} />}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="act-cards">
+                {data.map((entry, idx) => {
+                  const id = entry.id ?? String(idx);
+                  const open = openRow === id;
+                  return (
+                    <div className="act-card" key={id}>
+                      <div className="act-card-head">
+                        <div className="badges">
+                          <span className={`pill pill-${entry.signal}`}>{entry.signal}</span>
+                          <span className={`badge badge-${marketLabel(entry.market)}`}>{marketLabel(entry.market)}</span>
+                          {isRamp(entry) && <span className="badge">↗</span>}
+                        </div>
+                        <span className="num muted small">{entry.slot_date} {entry.slot_time}</span>
+                      </div>
+                      <div className="act-card-grid">
+                        <div><div className="muted small">Energy</div><div className="num">{fmtNum(entry.energy_kwh)} kWh</div></div>
+                        <div><div className="muted small">Delivery</div><div className="num">{typeof entry.delivery_pct === 'number' ? `${Math.round(entry.delivery_pct)}%` : '–'}</div></div>
+                        <div className="r"><div className="muted small">Net</div><div className={`num strong ${signClass(entry.net_total)}`}>{fmtEur(entry.net_total)}</div></div>
+                      </div>
+                      <div className="act-card-foot small muted">
+                        <span>Price <span className="num text">{entry.mffr_price ?? '–'}</span>{entry.price_source === 'estimate' ? ' est.' : ''}</span>
+                        <span>Kratt <span className="num text">{kratt(entry)}</span></span>
+                        <button type="button" className="rowbtn" aria-expanded={open} aria-label="Show details" onClick={() => setOpenRow(open ? null : id)}>
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ transform: open ? 'rotate(180deg)' : undefined }}><path d="m6 9 6 6 6-6" /></svg>
+                        </button>
+                      </div>
+                      {open && <RowDetails entry={entry} hm={hm} fmtNum={fmtNum} fmtEur={fmtEur} />}
+                    </div>
+                  );
+                })}
+              </div>
+            </>
           )}
-        </tbody>
-      </table>
+        </section>
+      </div>
+    </div>
+  );
+}
 
-      {/* Detail table */}
-      <table style={{ width: '100%', marginTop: '1rem', borderCollapse: 'collapse' }}>
-        <thead>
-          <tr style={{ textAlign: 'left', borderBottom: '2px solid #ddd' }}>
-            <th>Date</th>
-            <th>Time</th>
-            <th>Signal</th>
-            <th>Market</th>
-            <th>Duration</th>
-            <th>Energy (kWh)</th>
-            <th>Requested (kWh)</th>
-            <th>Delivery</th>
-            <th>Grid (kWh)</th>
-            <th>NPS €</th>
-            <th>Activation €</th>
-            <th>Kratt kWh</th>
-            <th>Kratt €</th>
-            <th>Net</th>
-            <th>€/MWh</th>
-            <th>Price (€/MWh)</th>
-            <th>NPS (€/MWh)</th>
-            <th>Baseline (W)</th>
-            <th>Start</th>
-            <th>End</th>
-            <th>Backup</th>
-            <th>Cancelled</th>
-          </tr>
-        </thead>
-        <tbody>
-          {data.map((entry, idx) => (
-            <tr key={entry.id ?? idx}>
-              <td data-label="Date">{entry.slot_date}</td>
-              <td data-label="Time">{entry.slot_time}</td>
-              <td data-label="Signal" style={{ color: entry.signal === 'UP' ? 'green' : 'red', fontWeight: 'bold' }}>
-                {entry.signal}
-              </td>
-              <td data-label="Market" title={entry.id?.endsWith('_r') ? 'mFRR ramp minute, priced with the next quarter' : undefined}>
-                {entry.market === 'AFRR' ? 'aFRR' : entry.market === 'MFRR' ? 'mFRR' : '-'}
-                {entry.id?.endsWith('_r') ? ' ↗' : ''}
-              </td>
-              <td data-label="Duration">{entry.duration ?? '-'}</td>
-              <td data-label="Energy (kWh)">{entry.energy_kwh?.toFixed(2)}</td>
-              <td data-label="Requested (kWh)">{typeof entry.requested_kwh === 'number' ? entry.requested_kwh.toFixed(2) : '-'}</td>
-              <td data-label="Delivery">{typeof entry.delivery_pct === 'number' ? `${Math.round(entry.delivery_pct)}%` : '-'}</td>
-              <td data-label="Grid (kWh)">{entry.grid_kwh?.toFixed(2)}</td>
-              <td data-label="NPS (€)" style={{ color: entry.grid_cost * -1 >= 0 ? 'green' : 'red' }}>{safeFixed(entry.grid_cost * -1, 2)}</td>
-              <td data-label="Activation (€)" style={{ color: entry.profit >= 0 ? 'green' : 'red' }}>
-                {entry.profit === null || entry.profit === undefined ? '-' : `${entry.profit.toFixed(2)} €`}
-              </td>
-              {(() => {
-                const key = `${entry.timeslot}|${entry.signal}`;
-                const o = official.get(key);
-                if (!o || officialRowId.get(key) !== entry.id) return (<><td data-label="Kratt kWh">-</td><td data-label="Kratt €">-</td></>);
-                return (
-                  <>
-                    <td data-label="Kratt kWh">{typeof o.kwh === 'number' ? o.kwh.toFixed(2) : '-'}</td>
-                    <td data-label="Kratt €" style={{ color: o.share >= 0 ? 'green' : 'red' }}>{o.share.toFixed(2)} €</td>
-                  </>
-                );
-              })()}
-              <td data-label="Net (€)" style={{ color: entry.net_total >= 0 ? 'green' : 'red' }}>
-                {safeFixed(entry.net_total, 2)}
-              </td>
-              <td data-label="€/MWh" style={{ color: entry.price_per_kwh >= 0 ? 'green' : 'red' }}>
-                {typeof entry.price_per_kwh === 'number'
-                  ? `${(entry.price_per_kwh * 1000).toFixed(2)}`
-                  : '-'}
-              </td>
-              <td data-label="Price (€/MWh)" title={entry.price_source === 'estimate' ? 'aFRR price not published yet: estimate (AFRR_PRICE_*_EUR_MWH)' : entry.price_source || undefined}>
-                {entry.mffr_price === null || entry.mffr_price === undefined ? '-' : entry.mffr_price}
-                {entry.price_source === 'estimate' ? ' est.' : ''}
-              </td>
-              <td data-label="NPS (€/MWh)">{entry.nordpool_price === null ? '-' : (entry.nordpool_price * 1000).toFixed(2)}</td>
-              <td data-label="Baseline (W)">{formatW(entry.baseline_w)}</td>
-              <td data-label="Start">
-                {new Date(entry.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}
-              </td>
-              <td data-label="End">
-                {(() => {
-                  const endDate = new Date(entry.end);
-                  if (endDate.getSeconds() > 0 || endDate.getMilliseconds() > 0) {
-                    endDate.setMinutes(endDate.getMinutes() + 1);
-                  }
-                  endDate.setSeconds(0);
-                  endDate.setMilliseconds(0);
-                  return endDate.toLocaleTimeString([], {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    hour12: false,
-                  });
-                })()}
-              </td>
-              <td data-label="Backup">{entry.was_backup === undefined ? '-' : entry.was_backup ? 'Yes' : 'No'}</td>
-              <td data-label="Cancelled">{entry.cancelled === undefined ? '-' : entry.cancelled ? 'Yes' : 'No'}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-
+function RowDetails({ entry, hm, fmtNum, fmtEur }) {
+  const yesNo = (v) => (v === undefined || v === null ? '–' : v ? 'Yes' : 'No');
+  return (
+    <div className="details">
+      <div><div className="muted small">Grid</div><div className="num">{fmtNum(entry.grid_kwh)} kWh</div></div>
+      <div><div className="muted small">Bill effect</div><div className="num">{typeof entry.grid_cost === 'number' ? fmtEur(-entry.grid_cost) : '–'}</div></div>
+      <div><div className="muted small">NPS</div><div className="num">{typeof entry.nordpool_price === 'number' ? `${(entry.nordpool_price * 1000).toFixed(2)} €/MWh` : '–'}</div></div>
+      <div><div className="muted small">Baseline</div><div className="num">{typeof entry.baseline_w === 'number' ? `${Math.round(entry.baseline_w)} W` : '–'}</div></div>
+      <div><div className="muted small">Start → end</div><div className="num">{hm(entry.start)} → {hm(entry.end)}</div></div>
+      <div><div className="muted small">€/MWh net</div><div className="num">{typeof entry.price_per_kwh === 'number' ? (entry.price_per_kwh * 1000).toFixed(2) : '–'}</div></div>
+      <div><div className="muted small">Backup</div><div>{yesNo(entry.was_backup)}</div></div>
+      <div><div className="muted small">Cancelled</div><div>{yesNo(entry.cancelled)}</div></div>
     </div>
   );
 }
