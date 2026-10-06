@@ -107,8 +107,10 @@ def get_mffr_data(
         row["tariff_period"] = fees.network_period(datetime.fromisoformat(slot), fee_values) if slot else None
         bill = fees.bill_effect(row, with_fees=True, fees=fee_values) if row.get("profit") is not None else None
         if bill is None:
-            row["grid_cost_fees"] = row["net_total_fees"] = row["price_per_kwh_fees"] = None
+            row["grid_cost_fees"] = row["net_total_fees"] = row["price_per_kwh_fees"] = row["fees_eur"] = None
             continue
+        # What seller and network fees add (−) or save (+) on top of the spot + VAT bill effect
+        row["fees_eur"] = round(bill + (row.get("grid_cost") or 0.0), 5)
         net = row["profit"] + bill
         energy = row.get("energy_kwh") or 0.0
         row["grid_cost_fees"] = round(-bill, 5)
