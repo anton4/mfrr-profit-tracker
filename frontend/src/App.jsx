@@ -99,8 +99,9 @@ function App() {
         const res = await fetch(url);
         const json = await res.json();
 
-        // json shape: { timeslotISO: row, ... }
-        const enriched = Object.entries(json).map(([timeslot, entry]) => {
+        // json shape: { "<timeslotISO>_<signal>": row, ... }: one row per slot and direction
+        const enriched = Object.values(json).map((entry) => {
+          const timeslot = entry.timeslot;
           const start = new Date(entry.start);
           const end = new Date(entry.end);
           const slotStart = new Date(timeslot);
@@ -377,7 +378,7 @@ function App() {
         </thead>
         <tbody>
           {data.map((entry, idx) => (
-            <tr key={idx}>
+            <tr key={entry.id ?? idx}>
               <td data-label="Date">{entry.slot_date}</td>
               <td data-label="Time">{entry.slot_time}</td>
               <td data-label="Signal" style={{ color: entry.signal === 'UP' ? 'green' : 'red', fontWeight: 'bold' }}>
