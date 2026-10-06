@@ -51,7 +51,7 @@
 }
 
 .page {
-  max-width: 1360px;
+  max-width: 1840px;
   margin: 0 auto;
   padding: 28px clamp(16px, 3vw, 40px) 56px;
   display: flex;
@@ -144,17 +144,18 @@ button { font: inherit; }
 .up-text { color: var(--up); }
 
 .split-row { display: flex; flex-wrap: wrap; gap: 16px; align-items: stretch; }
-.direction { flex: 999 1 600px; min-width: 0; }
+.direction { flex: 999 1 940px; min-width: 0; }
 .tools { flex: 1 1 340px; min-width: 0; gap: 16px; }
 
 /* ---------- by direction ---------- */
 .dir-grid {
   display: grid;
-  grid-template-columns: 96px repeat(9, minmax(64px, 1fr));
-  min-width: 760px;
+  grid-template-columns: minmax(88px, auto) repeat(9, minmax(min-content, 1fr));
   font-size: 13px;
 }
-.dir-grid .th { padding: 6px 0 8px; color: var(--muted); }
+.dir-grid .th { padding: 6px 0 8px; color: var(--muted); align-self: end; }
+.dir-grid .th, .dir-row > div { padding-left: 8px; }
+.dir-row > div { white-space: nowrap; }
 .dir-row { display: contents; }
 .dir-row > div { padding: 11px 0; border-top: 1px solid var(--line); display: flex; align-items: center; }
 .dir-row.total > div { font-weight: 600; }
@@ -212,18 +213,23 @@ button { font: inherit; }
 .legend > span { display: inline-flex; align-items: center; gap: 6px; }
 .empty { padding: 32px 20px; text-align: center; }
 
-.act-inner { min-width: 1180px; }
+.act-inner { min-width: 1270px; }
 .act-grid {
   display: grid;
-  grid-template-columns: minmax(130px, 1.3fr) 96px 110px 60px 80px 92px 128px 100px 132px 92px 128px 52px;
+  /* every column takes a share of extra width on wide screens */
+  grid-template-columns:
+    minmax(116px, 1.3fr) minmax(86px, 0.8fr) minmax(86px, 0.9fr) minmax(48px, 0.5fr) minmax(70px, 0.75fr)
+    minmax(88px, 0.85fr) minmax(92px, 1fr) minmax(88px, 0.9fr) minmax(84px, 0.9fr) minmax(70px, 0.85fr)
+    minmax(76px, 0.9fr) minmax(104px, 1.1fr) minmax(92px, 1fr) 36px;
   align-items: center;
   column-gap: 8px;
   padding: 8px 20px;
 }
 .act-grid > div { display: flex; align-items: center; }
 .act-head {
+  align-items: end;
   background: var(--surface-2); color: var(--muted);
-  font-size: 12px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.04em; padding: 10px 20px;
+  font-size: 12.5px; font-weight: 500; padding: 10px 20px;
 }
 .act-item { border-top: 1px solid var(--line); }
 .act-row { min-height: 40px; }
@@ -318,7 +324,7 @@ button { font: inherit; }
 .hint { position: relative; display: inline-flex; align-items: center; gap: 4px; }
 .hint-btn {
   display: inline-flex; align-items: center; justify-content: center; flex: none;
-  width: 20px; height: 20px; margin: -4px -4px -4px 0; padding: 0; border: 0; border-radius: 50%;
+  width: 20px; height: 20px; margin: -4px 0; padding: 0; border: 0; border-radius: 50%;
   background: transparent; color: var(--muted); cursor: help; opacity: 0.7;
 }
 .hint-btn:hover, .hint-btn:focus-visible { opacity: 1; color: var(--accent); }
@@ -328,15 +334,29 @@ button { font: inherit; }
   font-size: 12.5px; font-weight: 400; line-height: 1.45; text-align: left;
   text-transform: none; letter-spacing: normal; white-space: normal;
   box-shadow: 0 8px 24px rgba(16, 24, 40, 0.18);
-  opacity: 0; visibility: hidden; transform: translateY(-4px); pointer-events: none;
-  transition: opacity 0.12s ease, transform 0.12s ease, visibility 0.12s;
+  display: none;   /* hidden pop-ups must not widen scroll areas */
 }
 .hint-left { left: -8px; }
 .hint-right { right: -8px; }
-.hint:hover .hint-pop, .hint:focus-within .hint-pop { opacity: 1; visibility: visible; transform: translateY(0); }
+.hint:hover .hint-pop, .hint:focus-within .hint-pop { display: block; animation: hint-in 0.12s ease; }
+@keyframes hint-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 /* tables scroll sideways; leave room so the first rows' hints aren't cut off */
 .dir-grid, .act-inner { padding-bottom: 4px; }
 
 /* ---------- activations: own scroll area with a pinned label row ---------- */
 .act-table { max-height: min(78vh, 920px); overflow: auto; overscroll-behavior: contain; }
 .act-head { position: sticky; top: 0; z-index: 5; box-shadow: 0 1px 0 var(--line); }
+
+/* a figure shown for comparison but not counted (fees while the Fees switch is off) */
+.excluded { color: var(--muted); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--muted) 60%, transparent); }
+
+/* totals row pinned at the bottom of the activations scroll area */
+.act-total {
+  position: sticky; bottom: 0; z-index: 4; min-height: 44px;
+  background: var(--surface-2); box-shadow: 0 -1px 0 var(--line); font-weight: 600;
+}
+.act-card-money { display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 0 12px 6px; }
+.act-card-total { background: var(--surface-2); }
+.act-card-total .act-card-head { padding-bottom: 6px; font-weight: 600; }
+.act-row > div:nth-child(12), .act-total > div:nth-child(12) { font-size: 12px; white-space: nowrap; }
+.act-head .hint { gap: 3px; }

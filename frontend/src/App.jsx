@@ -25,6 +25,9 @@ const HINTS = {
   kratt: 'Official regulated energy (kWh) and your share (€) for this slot and direction, from the imported Qilowatt revenue report.',
   price: 'Balancing energy price for this direction: mFRR from the Baltic Transparency Dashboard, aFRR from Volton. "est." = aFRR price not published yet, estimated.',
   grid: 'Net grid energy during the activation: + import, − export.',
+  energyEur: 'Change in your electricity bill at spot price (plus VAT on import) compared with staying at the baseline: extra import costs, extra export earns, avoided import saves.',
+  feesEur: 'What network and seller fees add (−) or save (+) for this activation on top of Energy €: network tariff, renewable energy, excise, balancing and security of supply fees, seller margin (with VAT) and export fees. Counted in Net only when Fees is on.',
+  totals: 'Sums for all activations in the selected period. Delivery = total regulated ÷ total requested energy.',
   bill: 'Change in your electricity bill compared with what the baseline would have imported or exported in the same time.',
   rate: 'Network tariff period of the slot: day, night/weekend/holiday, or Võrk 5 winter peak.',
   nps: 'Nord Pool day-ahead (spot) price for the slot.',
@@ -390,9 +393,9 @@ function App() {
 
   const summary = useMemo(() => {
     const acc = {
-      up:  { energy: 0, grid_energy: 0, profit: 0, duration: 0, count: 0, backup: 0, cancelled: 0, grid: 0, kratt: 0, ffr: 0, net: 0, priceSum: 0, priceCount: 0 },
-      down:{ energy: 0, grid_energy: 0, profit: 0, duration: 0, count: 0, backup: 0, cancelled: 0, grid: 0, kratt: 0, ffr: 0, net: 0, priceSum: 0, priceCount: 0 },
-      total:{ energy: 0, grid_energy: 0, profit: 0, duration: 0, count: 0, backup: 0, cancelled: 0, grid: 0, kratt: 0, ffr: 0, net: 0, priceSum: 0, priceCount: 0 },
+      up:  { energy: 0, grid_energy: 0, profit: 0, duration: 0, count: 0, backup: 0, cancelled: 0, grid: 0, kratt: 0, ffr: 0, net: 0, priceSum: 0, priceCount: 0, billSpot: 0, fees: 0, requested: 0 },
+      down:{ energy: 0, grid_energy: 0, profit: 0, duration: 0, count: 0, backup: 0, cancelled: 0, grid: 0, kratt: 0, ffr: 0, net: 0, priceSum: 0, priceCount: 0, billSpot: 0, fees: 0, requested: 0 },
+      total:{ energy: 0, grid_energy: 0, profit: 0, duration: 0, count: 0, backup: 0, cancelled: 0, grid: 0, kratt: 0, ffr: 0, net: 0, priceSum: 0, priceCount: 0, billSpot: 0, fees: 0, requested: 0 },
     };
 
     for (const entry of data) {
@@ -408,6 +411,9 @@ function App() {
       const isCancelled = !isRamp && Boolean(entry.cancelled);
 
       const gridCost = (feesOn ? entry.grid_cost_fees : entry.grid_cost) || 0;
+      const billSpot = -(entry.grid_cost || 0);      // energy at spot (+ VAT on import)
+      const feesEur = entry.fees_eur || 0;            // what network and seller fees add/save
+      const requested = entry.requested_kwh || 0;
       const krattFee = entry.kratt_fee || 0;
       const ffrIncome = entry.ffr_income || 0;
       const netTotal = (feesOn ? entry.net_total_fees : entry.net_total) || 0;
@@ -422,6 +428,9 @@ function App() {
       acc.total.backup += isBackup ? 1 : 0;
       acc.total.cancelled += isCancelled ? 1 : 0;
       acc.total.grid += gridCost;
+      acc.total.billSpot += billSpot;
+      acc.total.fees += feesEur;
+      acc.total.requested += requested;
       acc.total.kratt += krattFee;
       acc.total.ffr += ffrIncome;
       acc.total.net += netTotal;
@@ -440,6 +449,9 @@ function App() {
         bucket.backup += isBackup ? 1 : 0;
         bucket.cancelled += isCancelled ? 1 : 0;
         bucket.grid += gridCost;
+        bucket.billSpot += billSpot;
+        bucket.fees += feesEur;
+        bucket.requested += requested;
         bucket.kratt += krattFee;
         bucket.ffr += ffrIncome;
         bucket.net += netTotal;
@@ -502,6 +514,7 @@ function App() {
   const marketLabel = (m) => (m === 'AFRR' ? 'aFRR' : m === 'MFRR' ? 'mFRR' : '–');
   const isRamp = (e) => Boolean(e.id?.endsWith('_r'));
   const netOf = (e) => (feesOn ? e.net_total_fees : e.net_total);
+  const energyEurOf = (e) => (typeof e.grid_cost === 'number' ? -e.grid_cost : undefined);
 
   // Delivery over all rows with a request: delivered / requested energy
   const delivery = useMemo(() => {
@@ -631,7 +644,8 @@ function App() {
             <div className="muted small">Net result {feesOn ? '· incl. network & seller fees' : '· spot + VAT'}</div>
             <div className={`kpi-value num ${signClass(summary.total.net)}`}>{fmtEur(summary.total.net)}</div>
             <div className="muted small">
-              Activation <span className="num">{fmtEur(summary.total.profit)}</span> · Bill effect <span className="num">{fmtEur(-summary.total.grid)}</span>
+              Activation <span className="num">{fmtEur(summary.total.profit)}</span> · Energy <span className="num">{fmtEur(summary.total.billSpot)}</span>
+              {' · '}Fees <span className={`num ${feesOn ? '' : 'excluded'}`}>{fmtEur(summary.total.fees)}</span>{!feesOn && ' (not included)'}
             </div>
           </div>
           <div className="card kpi">
@@ -680,48 +694,48 @@ function App() {
             <div className="scroll-x">
               <div className="dir-grid">
                 <div className="th" />
-                <div className="th r"><Hint label="Split" hint={HINTS.split} /></div>
-                <div className="th r"><Hint label="Count" hint={HINTS.count} /></div>
+                <div className="th r"><Hint label="Count · split" hint={`${HINTS.count} ${HINTS.split}`} /></div>
                 <div className="th r"><Hint label="Duration" hint={HINTS.duration} /></div>
                 <div className="th r"><Hint label="Energy" hint={HINTS.energy} /></div>
-                <div className="th r"><Hint label="Activation" hint={HINTS.activation} /></div>
-                <div className="th r"><Hint label="Net" hint={HINTS.net} /></div>
+                <div className="th r"><Hint label="Activation" hint={HINTS.activation} align="right" /></div>
+                <div className="th r"><Hint label="Energy €" hint={HINTS.energyEur} align="right" /></div>
+                <div className="th r"><Hint label="Fees" hint={HINTS.feesEur} align="right" /></div>
+                <div className="th r"><Hint label="Net" hint={HINTS.net} align="right" /></div>
                 <div className="th r"><Hint label="Avg €/MWh" hint={HINTS.avg} align="right" /></div>
-                <div className="th r"><Hint label="Backup" hint={HINTS.backup} align="right" /></div>
-                <div className="th r"><Hint label="Cancelled" hint={HINTS.cancelled} align="right" /></div>
+                <div className="th r"><Hint label="Backup · cancelled" hint={`Backup: ${HINTS.backup} Cancelled: ${HINTS.cancelled}`} align="right" /></div>
                 {directionRows.map(([dir, b, split]) => (
                   <div className="dir-row" key={dir}>
                     <div><span className={`pill pill-${dir}`}>{dir}</span></div>
-                    <div className="num r">{split}</div>
-                    <div className="num r">{b.count}</div>
+                    <div className="num r">{b.count}<span className="muted">&nbsp;·&nbsp;{split}</span></div>
                     <div className="num r">{formatDuration(b.duration)}</div>
                     <div className="num r">{fmtNum(b.energy)} kWh</div>
                     <div className={`num r ${signClass(b.profit)}`}>{fmtEur(b.profit)}</div>
+                    <div className={`num r ${signClass(b.billSpot)}`}>{fmtEur(b.billSpot)}</div>
+                    <div className={`num r ${feesOn ? signClass(b.fees) : 'excluded'}`}>{fmtEur(b.fees)}</div>
                     <div className={`num r ${signClass(b.net)}`}>{fmtEur(b.net)}</div>
                     <div className="num r">{b.energy ? Math.round((b.net / b.energy) * 1000) : '–'}</div>
-                    <div className="num r muted">{percent(b.backup, b.count)}</div>
-                    <div className="num r muted">{percent(b.cancelled, b.count)}</div>
+                    <div className="num r muted">{percent(b.backup, b.count)} · {percent(b.cancelled, b.count)}</div>
                   </div>
                 ))}
                 <div className="dir-row total">
                   <div>Total</div>
-                  <div className="num r" />
                   <div className="num r">{summary.total.count}</div>
                   <div className="num r">{formatDuration(summary.total.duration)}</div>
                   <div className="num r">{fmtNum(summary.total.energy)} kWh</div>
                   <div className={`num r ${signClass(summary.total.profit)}`}>{fmtEur(summary.total.profit)}</div>
+                  <div className={`num r ${signClass(summary.total.billSpot)}`}>{fmtEur(summary.total.billSpot)}</div>
+                  <div className={`num r ${feesOn ? signClass(summary.total.fees) : 'excluded'}`}>{fmtEur(summary.total.fees)}</div>
                   <div className={`num r ${signClass(summary.total.net)}`}>{fmtEur(summary.total.net)}</div>
                   <div className="num r">{summary.total.energy ? Math.round((summary.total.net / summary.total.energy) * 1000) : '–'}</div>
-                  <div className="num r muted">{percent(summary.total.backup, summary.total.count)}</div>
-                  <div className="num r muted">{percent(summary.total.cancelled, summary.total.count)}</div>
+                  <div className="num r muted">{percent(summary.total.backup, summary.total.count)} · {percent(summary.total.cancelled, summary.total.count)}</div>
                 </div>
                 {hasReport && (
                   <div className="dir-row report">
                     <div><Hint label="Kratt report" hint={HINTS.report} /></div>
-                    <div /><div /><div />
+                    <div /><div />
                     <div className="num r">{fmtNum(officialTotal.kwh)} kWh</div>
                     <div className="num r">{fmtNum(officialTotal.share)} €</div>
-                    <div /><div /><div /><div />
+                    <div /><div /><div /><div /><div />
                   </div>
                 )}
               </div>
@@ -868,9 +882,11 @@ function App() {
                     <div className="r"><Hint label="Energy" hint={HINTS.energy} /></div>
                     <div className="r"><Hint label="Requested" hint={HINTS.requested} /></div>
                     <div className="pl"><Hint label="Delivery" hint={HINTS.delivery} /></div>
-                    <div className="r"><Hint label="Activation" hint={HINTS.activation} /></div>
-                    <div className="r"><Hint label="Kratt kWh · €" hint={HINTS.kratt} align="right" /></div>
+                    <div className="r"><Hint label="Activation" hint={HINTS.activation} align="right" /></div>
+                    <div className="r"><Hint label="Energy €" hint={HINTS.energyEur} align="right" /></div>
+                    <div className="r"><Hint label="Fees" hint={HINTS.feesEur} align="right" /></div>
                     <div className="r"><Hint label="Net" hint={HINTS.net} align="right" /></div>
+                    <div className="r"><Hint label="Kratt kWh · €" hint={HINTS.kratt} align="right" /></div>
                     <div className="r"><Hint label="Price €/MWh" hint={HINTS.price} align="right" /></div>
                     <div />
                   </div>
@@ -895,8 +911,10 @@ function App() {
                             <span className="num small">{pct === null ? '–' : `${pct}%`}</span>
                           </div>
                           <div className={`num r ${signClass(entry.profit)}`}>{fmtEur(entry.profit)}</div>
-                          <div className="num r muted">{kratt(entry)}</div>
+                          <div className={`num r ${signClass(energyEurOf(entry))}`}>{fmtEur(energyEurOf(entry))}</div>
+                          <div className={`num r ${feesOn ? signClass(entry.fees_eur) : 'excluded'}`}>{fmtEur(entry.fees_eur)}</div>
                           <div className={`num r strong ${signClass(netOf(entry))}`}>{fmtEur(netOf(entry))}</div>
+                          <div className="num r muted">{kratt(entry)}</div>
                           <div className="num r" title={entry.price_source === 'estimate' ? 'aFRR price not published yet: estimate' : entry.price_source || undefined}>
                             {entry.mffr_price ?? '–'}
                             {entry.price_source === 'estimate' && <span className="badge badge-aFRR est">est.</span>}
@@ -911,10 +929,36 @@ function App() {
                       </div>
                     );
                   })}
+                  <div className="act-grid act-total">
+                    <div><Hint label="Total" hint={HINTS.totals} /></div>
+                    <div className="muted small">{summary.total.count} activations</div>
+                    <div />
+                    <div className="num r">{summary.total.duration || '–'}</div>
+                    <div className="num r">{fmtNum(summary.total.energy)}</div>
+                    <div className="num r muted">{fmtNum(summary.total.requested)}</div>
+                    <div className="delivery pl">
+                      <div className="meter"><div style={{ width: `${Math.min(delivery ?? 0, 100)}%` }} /></div>
+                      <span className="num small">{delivery === null ? '–' : `${delivery}%`}</span>
+                    </div>
+                    <div className={`num r ${signClass(summary.total.profit)}`}>{fmtEur(summary.total.profit)}</div>
+                    <div className={`num r ${signClass(summary.total.billSpot)}`}>{fmtEur(summary.total.billSpot)}</div>
+                    <div className={`num r ${feesOn ? signClass(summary.total.fees) : 'excluded'}`}>{fmtEur(summary.total.fees)}</div>
+                    <div className={`num r ${signClass(summary.total.net)}`}>{fmtEur(summary.total.net)}</div>
+                    <div className="num r muted">{hasReport ? `${fmtNum(officialTotal.kwh)} · ${officialTotal.share.toFixed(2)} €` : '–'}</div>
+                    <div /><div />
+                  </div>
                 </div>
               </div>
 
               <div className="act-cards">
+                <div className="act-card act-card-total">
+                  <div className="act-card-head"><Hint label="Period total" hint={HINTS.totals} /><span className={`num strong ${signClass(summary.total.net)}`}>{fmtEur(summary.total.net)}</span></div>
+                  <div className="act-card-money small muted">
+                    <span>Activation <span className="num text">{fmtEur(summary.total.profit)}</span></span>
+                    <span>Energy <span className="num text">{fmtEur(summary.total.billSpot)}</span></span>
+                    <span>Fees <span className={`num ${feesOn ? 'text' : 'excluded'}`}>{fmtEur(summary.total.fees)}</span></span>
+                  </div>
+                </div>
                 {data.map((entry, idx) => {
                   const id = entry.id ?? String(idx);
                   const open = openRow === id;
@@ -932,6 +976,11 @@ function App() {
                         <div><div className="muted small"><Hint label="Energy" hint={HINTS.energy} /></div><div className="num">{fmtNum(entry.energy_kwh)} kWh</div></div>
                         <div><div className="muted small"><Hint label="Delivery" hint={HINTS.delivery} /></div><div className="num">{typeof entry.delivery_pct === 'number' ? `${Math.round(entry.delivery_pct)}%` : '–'}</div></div>
                         <div className="r"><div className="muted small"><Hint label="Net" hint={HINTS.net} align="right" /></div><div className={`num strong ${signClass(netOf(entry))}`}>{fmtEur(netOf(entry))}</div></div>
+                      </div>
+                      <div className="act-card-money small muted">
+                        <span>Activation <span className="num text">{fmtEur(entry.profit)}</span></span>
+                        <span>Energy <span className="num text">{fmtEur(energyEurOf(entry))}</span></span>
+                        <span>Fees <span className={`num ${feesOn ? 'text' : 'excluded'}`}>{fmtEur(entry.fees_eur)}</span></span>
                       </div>
                       <div className="act-card-foot small muted">
                         <span>Price <span className="num text">{entry.mffr_price ?? '–'}</span>{entry.price_source === 'estimate' ? ' est.' : ''}</span>
