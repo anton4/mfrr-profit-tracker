@@ -12,6 +12,7 @@ import requests
 from sqlite_utils import Database
 
 import mffr_price_updater
+import newday
 import profit_calc
 from ha import SENSOR_GRID_POWER, SENSOR_MODE, SENSOR_POWERLIMIT, SENSOR_SOURCE
 from history import HistoryStates, current_units, fetch_history
@@ -128,6 +129,12 @@ def run_backfill(start: datetime, end: datetime, progress=lambda phase, pct: Non
             if i >= 0:   # hourly (older) or 15-min prices: last price at or before the slot start
                 db["slots"].update(row["id"], {"nordpool_price": round(nps[i][1], 5)})
         profit_calc.run_profit_calculation()
+        # aFRR market price (CBMP) for comparison, when newday.ee credentials are configured
+        if afrr_rows and newday.configured():
+            try:
+                newday.fill_rows(db, afrr_rows)
+            except Exception as e:
+                print(f"⚠️ newday.ee CBMP unavailable: {e}")
 
     progress("done", 100)
     return {"from": start.isoformat(), "to": end.isoformat(), "slots_written": len(rows)}
