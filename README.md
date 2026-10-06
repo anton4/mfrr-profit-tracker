@@ -143,7 +143,7 @@ Edit the fees under **Data tools → Electricity fees**. Values are in cents/kWh
 | VAT | 24 % |
 | Export margin, export balancing fee | 0 (contract-specific) |
 
-Defaults can be overridden with `FEE_MARGIN`, `FEE_TAASTUV`, `FEE_AKTSIIS`, `FEE_TASAKAAL`, `FEE_VARUSTUS`, `FEE_ELEKTRILEVI_DAY`, `FEE_ELEKTRILEVI_NIGHT`, `FEE_VAT`, `FEE_EXPORT_MARGIN` and `FEE_EXPORT_TASAKAAL`. One set of values applies to all history; rate changes over time aren't modelled. Pick the day/night prices of your own Elektrilevi package (Võrk 4: 4.58 / 2.60 incl. VAT).
+Defaults can be overridden with `FEE_MARGIN`, `FEE_TAASTUV`, `FEE_AKTSIIS`, `FEE_TASAKAAL`, `FEE_VARUSTUS`, `FEE_ELEKTRILEVI_DAY`, `FEE_ELEKTRILEVI_NIGHT`, `FEE_VAT`, `FEE_EXPORT_MARGIN` and `FEE_EXPORT_TASAKAAL`. One set of values applies to all history; rate changes over time aren't modelled. Pick the day/night prices of your own Elektrilevi package from its price list (excl. VAT, valid from 1 June 2026): Võrk 2 6.07 / 3.51, Võrk 4 3.69 / 2.10.
 
 The `?fees=on|off` and `?range=this_month` URL parameters open the dashboard with that setting.
 
