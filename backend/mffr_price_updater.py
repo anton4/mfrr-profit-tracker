@@ -92,7 +92,7 @@ def fetch_and_update_mffr_prices():
 
             if mfrr_price is not None:
                 db["slots"].update(
-                    row["timeslot"],
+                    row["id"],
                     {"mffr_price": mfrr_price},
                     alter=True
                 )

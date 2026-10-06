@@ -81,7 +81,8 @@ def get_mffr_data(
         print(f"DB query failed: where='{where_clause}' args={params} err={e}")
         raise
 
-    return {row["timeslot"]: row for row in rows}
+    # One row per slot and direction, keyed by id ("<timeslot>_<signal>")
+    return {row["id"]: row for row in rows}
 
 @app.on_event("startup")
 def start_all_schedulers():

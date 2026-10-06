@@ -22,6 +22,7 @@ except Exception as e:
     print(f"⚙️ PRAGMA setup failed: {e}")
 
 init_db["slots"].create({
+    "id": str,             # "<timeslot>_<signal>": one row per direction, a slot can flip
     "timeslot": str,
     "start": str,
     "end": str,
@@ -35,7 +36,15 @@ init_db["slots"].create({
     "cancelled": bool,
     "was_backup": bool,
     "slot_end": str
-}, pk="timeslot", if_not_exists=True)
+}, pk="id", if_not_exists=True)
+
+# Migrate one-row-per-slot tables (pk timeslot) to one row per slot and direction
+if "id" not in init_db["slots"].columns_dict:
+    print("🛠️  Migrating 'slots' to one row per slot and direction")
+    init_db["slots"].add_column("id", str)
+    with init_db.conn:
+        init_db.conn.execute("UPDATE slots SET id = timeslot || '_' || COALESCE(signal, '')")
+    init_db["slots"].transform(pk="id")
 
 # Migrate legacy Fusebox column name
 if "fusebox_fee" in init_db["slots"].columns_dict and "kratt_fee" not in init_db["slots"].columns_dict:
@@ -56,6 +65,7 @@ required_columns = {
     "baseline_export_kwh": float,  # what the baseline would have exported over the metered time
     "requested_kwh": float,    # energy Kratt asked for (qw_powerlimit × metered time)
     "delivery_pct": float,     # delivered mFRR energy / requested energy
+    "active_s": float,         # seconds this direction was active in the slot
     "baseline_w": float        # locked baseline of the (latest) run in this slot
 }
 for column, col_type in required_columns.items():
@@ -82,8 +92,10 @@ def cleanup_zero_min_rows():
     try:
         cutoff = (datetime.now(tz) - timedelta(minutes=2)).isoformat()
         with db.conn:
+            # Spurious rows (e.g. a stale signal at a slot boundary); short legs of a direction
+            # flip that actually delivered energy are kept
             db.conn.execute(
-                "DELETE FROM slots WHERE duration_min = 0 AND end < ?",
+                "DELETE FROM slots WHERE duration_min = 0 AND end < ? AND COALESCE(energy_kwh, 0) < 0.01",
                 (cutoff,)
             )
     except Exception as e:
@@ -91,6 +103,9 @@ def cleanup_zero_min_rows():
             print("🧹 Cleanup skipped (database locked).")
         else:
             print(f"🧹 Scheduled cleanup failed: {e}")
+
+def slot_id(timeslot: str, signal: str) -> str:
+    return f"{timeslot}_{signal}"
 
 def write_current_timeslot():
     global last_logged_signal
@@ -116,8 +131,9 @@ def write_current_timeslot():
     if not signal:
         return
 
+    row_id = slot_id(key, signal)
     try:
-        row = db["slots"].get(key)
+        row = db["slots"].get(row_id)
     except NotFoundError:
         row = None
 
@@ -149,38 +165,42 @@ def write_current_timeslot():
             "delivery_pct": round(energy_kwh / requested_kwh * 100.0, 1) if requested_kwh > 0 else None,
         }
 
-    if row and row["signal"] == signal:
+    if row:
         end_time = datetime.fromisoformat(row["end"])
         if end_time < slot_end_time:
             start_time = datetime.fromisoformat(row["start"])
-            duration = round((now - start_time).total_seconds() / 60)
+            # Count only time this direction was active: after a flip and back, the gap since
+            # this row's last tick is not added (capped at about one tick)
+            since_last_s = (now - end_time).total_seconds()
+            active_s = (row.get("active_s") or 0.0) + (since_last_s if since_last_s <= 20 else 10.0)
             cancelled = now < (slot_end_time - timedelta(seconds=11))
             was_backup = (start_time - timeslot).total_seconds() >= 15
 
             update_data = {
-                "timeslot": key,
                 **totals(row),
                 "end": now.isoformat(),
-                "duration_min": duration,
+                "active_s": round(active_s, 1),
+                "duration_min": round(active_s / 60),
                 "cancelled": cancelled,
                 "was_backup": was_backup,
                 "slot_end": slot_end_time.isoformat(),
             }
-            db["slots"].update(key, update_data)
+            db["slots"].update(row_id, update_data)
     else:
         if (now - timeslot).total_seconds() < 5:
             return
 
         try:
             prev_slot_time = timeslot - timedelta(minutes=15)
-            previous = db["slots"].get(prev_slot_time.isoformat())
+            previous = db["slots"].get(slot_id(prev_slot_time.isoformat(), signal))
             previous_end = datetime.fromisoformat(previous["end"])
-            if previous["signal"] == signal and abs((now - previous_end).total_seconds()) <= 7:
+            if abs((now - previous_end).total_seconds()) <= 7:
                 return
         except NotFoundError:
             pass
 
         entry = {
+            "id": row_id,
             "timeslot": key,
             "start": now.isoformat(),
             "end": now.isoformat(),
@@ -190,11 +210,12 @@ def write_current_timeslot():
             "nordpool_price": None,
             "profit": None,
             "duration_min": 0,
+            "active_s": seconds or 10.0,
             "cancelled": False,
             "was_backup": False,
             "slot_end": slot_end_time.isoformat(),
         }
-        db["slots"].insert(entry, pk="timeslot", replace=True)
+        db["slots"].insert(entry, pk="id", alter=True)
 
     try:
         attrs = (get_entity(SENSOR_NORDPOOL) or {}).get("attributes", {})
@@ -206,10 +227,10 @@ def write_current_timeslot():
             if start <= timeslot < end:
                 price = round(p["value"], 5)
                 try:
-                    row = db["slots"].get(key)
+                    row = db["slots"].get(row_id)
                     if row.get("nordpool_price") is None:
-                        db["slots"].update(key, {"nordpool_price": price})
-                        print(f"📈 Set Nordpool price {price} €/kWh for slot {key}")
+                        db["slots"].update(row_id, {"nordpool_price": price})
+                        print(f"📈 Set Nordpool price {price} €/kWh for slot {row_id}")
                 except NotFoundError:
                     pass
                 break

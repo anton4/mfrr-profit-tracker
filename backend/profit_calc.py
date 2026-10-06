@@ -100,9 +100,9 @@ def run_profit_calculation():
         }
 
         if update:
-            db["slots"].update(row["timeslot"], update, alter=True)
+            db["slots"].update(row["id"], update, alter=True)
             updated = True
-            print(f"📊 Updated slot {row['timeslot']} → {update}")
+            print(f"📊 Updated slot {row['id']} → {update}")
 
     if updated:
         print("✅ Profit + financial breakdown updated.")
