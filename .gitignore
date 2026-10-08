@@ -1,5 +1,6 @@
 .env
-backend/data/frontend/dist/
+backend/data/
+frontend/dist/
 frontend/node_modules/
 backend/logs/
 __pycache__/
