@@ -23,7 +23,6 @@ services:
       - FEE_ELEKTRILEVI_DAY=${FEE_ELEKTRILEVI_DAY:-}
       - FEE_ELEKTRILEVI_NIGHT=${FEE_ELEKTRILEVI_NIGHT:-}
       - FEE_VAT=${FEE_VAT:-}
-      - NEWDAY_USER=${NEWDAY_USER:-}
-      - NEWDAY_PASSWORD=${NEWDAY_PASSWORD:-}
-      - NEWDAY_URL=${NEWDAY_URL:-https://srv.newday.ee/afrr_dashboard.php}
+      - ENTSOE_TOKEN=${ENTSOE_TOKEN:-}
+      - ENTSOE_CBMP_AREA=${ENTSOE_CBMP_AREA:-10Y1001A1001A39I}
     restart: unless-stopped

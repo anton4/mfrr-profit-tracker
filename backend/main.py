@@ -78,7 +78,7 @@ required_columns = {
     "market": str,             # MFRR / AFRR (NULL for rows recorded before market detection)
     "price_timeslot": str,     # slot whose prices apply (next quarter for an mFRR ramp minute)
     "price_source": str,       # btd / volton / estimate
-    "cbmp_avg": float,         # aFRR market price (newday.ee CBMP) over the row's active seconds
+    "cbmp_avg": float,         # aFRR market price (ENTSO-E PICASSO CBMP) over the row's active seconds
     "cbmp_points": int,        # 4-second prices behind cbmp_avg (0 = none published)
 }
 for column, col_type in required_columns.items():
