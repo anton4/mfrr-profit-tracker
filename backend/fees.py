@@ -16,7 +16,9 @@ from functools import lru_cache
 import pytz
 from sqlite_utils import Database
 
-DB_PATH = "data/mffr.db"
+import config
+
+DB_PATH = config.DB_PATH
 tz = pytz.timezone("Europe/Tallinn")
 
 # Defaults (s/kWh excl. VAT, Oct 2026): Elering taastuvenergia tasu 0.84, elektriaktsiis
@@ -219,3 +221,22 @@ def bill_effect(row: dict, with_fees: bool, fees: dict) -> float | None:
     if row.get("signal") == "DOWN":
         return -p_import * grid_import
     return p_export * grid_export
+
+
+def add_fee_columns(row: dict, fees: dict) -> dict:
+    """Add the 'with seller and network fees' variant to a slot row, computed with the current
+    fee settings so edits apply instantly (the stored grid_cost / net_total are spot + VAT only)."""
+    slot = row.get("price_timeslot") or row.get("timeslot")
+    row["tariff_period"] = network_period(datetime.fromisoformat(slot), fees) if slot else None
+    bill = bill_effect(row, with_fees=True, fees=fees) if row.get("profit") is not None else None
+    if bill is None:
+        row["grid_cost_fees"] = row["net_total_fees"] = row["price_per_kwh_fees"] = row["fees_eur"] = None
+        return row
+    # What seller and network fees add (−) or save (+) on top of the spot + VAT bill effect
+    row["fees_eur"] = round(bill + (row.get("grid_cost") or 0.0), 5)
+    net = row["profit"] + bill
+    energy = row.get("energy_kwh") or 0.0
+    row["grid_cost_fees"] = round(-bill, 5)
+    row["net_total_fees"] = round(net, 5)
+    row["price_per_kwh_fees"] = round(net / energy, 5) if energy > 0 else None
+    return row

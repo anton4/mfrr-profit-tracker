@@ -26,4 +26,5 @@ COPY backend/ .
 COPY --from=ui /ui/dist ./static
 RUN mkdir -p data logs
 
-CMD ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000"]
+# start.py maps Home Assistant add-on options to env vars, then runs uvicorn
+CMD ["python", "start.py"]

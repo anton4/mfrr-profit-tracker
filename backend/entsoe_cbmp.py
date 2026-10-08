@@ -14,7 +14,9 @@ import pytz
 import requests
 from sqlite_utils import Database
 
-DB_PATH = "data/mffr.db"
+import config
+
+DB_PATH = config.DB_PATH
 tz = pytz.timezone("Europe/Tallinn")
 
 ENTSOE_API = "https://web-api.tp.entsoe.eu/api"

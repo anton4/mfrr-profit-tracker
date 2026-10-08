@@ -9,8 +9,10 @@ from sqlite_utils.db import NotFoundError
 from ha import (SENSOR_NORDPOOL, GridMeter, classify_market, deviation_direction, get_entity,
                 get_requested_w, get_signal, get_source_changed)
 from baseline import SignalBaseline
+import ha_sensors
+import config
 
-DB_PATH = "data/mffr.db"
+DB_PATH = config.DB_PATH
 tz = pytz.timezone("Europe/Tallinn")
 SLOT = timedelta(minutes=15)
 
@@ -333,3 +335,4 @@ def write_current_timeslot():
 scheduler = BackgroundScheduler()
 scheduler.add_job(write_current_timeslot, 'interval', seconds=10, max_instances=1, coalesce=True)
 scheduler.add_job(cleanup_zero_min_rows, 'interval', minutes=1, max_instances=1, coalesce=True)
+scheduler.add_job(ha_sensors.publish_sensors, 'interval', minutes=1, max_instances=1, coalesce=True)
