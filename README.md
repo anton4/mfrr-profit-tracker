@@ -7,8 +7,29 @@ Track Manual Frequency Restoration Reserve (mFRR) activations dispatched by **Kr
 
 * * * * *
 
-**Setup**
----------
+**Install as a Home Assistant add-on**
+--------------------------------------
+
+On Home Assistant OS or Supervised, the tracker runs as an add-on. It opens from the sidebar (Ingress), gets its Home Assistant access from the Supervisor (no long-lived token), and is configured in the add-on's **Configuration** tab.
+
+1.  **Settings → Add-ons → Add-on Store → ⋮ → Repositories**, then add `https://github.com/anton4/mfrr-profit-tracker`.
+
+    [![Add repository](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fanton4%2Fmfrr-profit-tracker)
+
+2.  Install **mFRR Profit Tracker**, set your sensors under **Configuration**, then start it.
+
+This is a Home Assistant add-on repository, not a HACS integration. The add-on also publishes summary sensors (`sensor.mfrr_net_today`, `sensor.mfrr_net_total`, latest mFRR/aFRR prices, …). See [mfrr_tracker/DOCS.md](mfrr_tracker/DOCS.md) for the options, the sensors, Energy dashboard notes and how to migrate an existing database.
+
+### **Self-hosting the add-on**
+
+-   **Your own GitHub repository:** fork the repository and change `anton4` in `repository.yaml` and in the `image:` line of `mfrr_tracker/config.yaml` to your account. The `Add-on image` GitHub Action builds the amd64 and aarch64 images to `ghcr.io/<you>/mfrr-profit-tracker-<arch>` whenever the add-on `version` changes. Make those packages public once, then add your repository URL in the Add-on Store. Bump `version` (and `CHANGELOG.md`) to ship an update.
+
+-   **Local add-on, no GitHub or registry:** run `scripts/make-local-addon.sh` and copy `build/local-addon/mfrr_tracker` to the `/addons` folder on Home Assistant (Samba share or SSH add-on). In the Add-on Store choose **⋮ → Check for updates**, and the add-on appears under **Local add-ons**. Home Assistant builds the image itself, which takes several minutes on a Raspberry Pi. To update, run the script again, copy the folder over the old one, bump `version` and rebuild.
+
+* * * * *
+
+**Standalone setup (docker-compose)**
+-------------------------------------
 
 ### **1\. Clone the Repository**
 
@@ -52,6 +73,8 @@ KRATT_SHARE=0.20
 -   SENSOR_NORDPOOL: Nordpool integration sensor (no VAT/tariffs), price in €/kWh.
 
 -   KRATT_SHARE: Share of activation revenue kept by Kratt (default 0.20 = 20%).
+
+-   PUBLISH_SENSORS (optional): `true` publishes the summary sensors to Home Assistant, as the add-on does (see [mfrr_tracker/DOCS.md](mfrr_tracker/DOCS.md)). Off by default in standalone mode.
 
 * * * * *
 
@@ -217,6 +240,14 @@ How to run it:
 **Code layout**
 ---------------
 
+-   backend/start.py: Container entry point. Maps the add-on options (`/data/options.json`) to environment variables, then starts uvicorn.
+
+-   backend/config.py: Data and log directories (`/data` in the add-on).
+
+-   backend/ha_sensors.py: Publishes the summary sensors to Home Assistant.
+
+-   mfrr_tracker/, repository.yaml: Home Assistant add-on definition and add-on repository.
+
 -   backend/api.py: FastAPI app. Serves `/api/mffr`, `/api/price-sync`, `/api/backfill` and the built UI, and starts all schedulers.
 
 -   backend/backfill.py / backend/history.py: Backfill from the HA history API.
@@ -233,7 +264,7 @@ How to run it:
 
 -   backend/profit_calc.py: Calculates profit when all required fields are present.
 
--   backend/data/mffr.db: SQLite database storing all 15-min mFRR records.
+-   backend/data/mffr.db: SQLite database storing all 15-min mFRR records (`/data/mffr.db` in the add-on).
 
 -   frontend/src/App.jsx: React UI.
 

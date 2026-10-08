@@ -25,4 +25,5 @@ services:
       - FEE_VAT=${FEE_VAT:-}
       - ENTSOE_TOKEN=${ENTSOE_TOKEN:-}
       - ENTSOE_CBMP_AREA=${ENTSOE_CBMP_AREA:-10Y1001A1001A39I}
+      - PUBLISH_SENSORS=${PUBLISH_SENSORS:-false}
     restart: unless-stopped

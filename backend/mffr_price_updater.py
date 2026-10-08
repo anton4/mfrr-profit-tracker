@@ -7,9 +7,10 @@ import time
 import os
 
 import entsoe_cbmp
+import config
 
-DB_PATH = "data/mffr.db"
-LOG_PATH = "logs/mffr_price_fetch_errors.log"
+DB_PATH = config.DB_PATH
+LOG_PATH = os.path.join(config.LOG_DIR, "mffr_price_fetch_errors.log")
 tz = pytz.timezone("Europe/Tallinn")
 scheduler = BackgroundScheduler()
 

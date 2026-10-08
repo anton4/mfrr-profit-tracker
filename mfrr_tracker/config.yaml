@@ -1,0 +1,67 @@
+name: mFRR Profit Tracker
+version: "1.0.0"
+slug: mfrr_tracker
+description: Track Kratt mFRR/aFRR activations, delivered energy and profit from Home Assistant sensors
+url: https://github.com/anton4/mfrr-profit-tracker
+arch:
+  - amd64
+  - aarch64
+# Prebuilt by .github/workflows/addon-image.yml. Remove this line to build locally from the Dockerfile.
+image: ghcr.io/anton4/mfrr-profit-tracker-{arch}
+startup: application
+boot: auto
+init: true
+ingress: true
+ingress_port: 8000
+panel_icon: mdi:battery-charging-high
+panel_title: mFRR
+homeassistant_api: true
+# /share/mfrr_tracker/mffr.db is imported on first start (migration from a standalone install)
+map:
+  - share:ro
+# Direct access without the HA login is off by default; set a host port to enable it
+ports:
+  8000/tcp: null
+ports_description:
+  8000/tcp: Web UI and API (not needed with Ingress)
+options:
+  sensor_source: sensor.qw_source
+  sensor_mode: sensor.qw_mode
+  sensor_powerlimit: sensor.qw_powerlimit
+  sensor_grid_power:
+    - sensor.shellyem3_channel_a_power
+    - sensor.shellyem3_channel_b_power
+    - sensor.shellyem3_channel_c_power
+  sensor_nordpool: sensor.nordpool_kwh_ee_eur_3_10_0
+  kratt_share: 0.2
+  afrr_price_up_eur_mwh: 440
+  afrr_price_down_eur_mwh: -530
+  mfrr_price_area: Estonia
+  fee_network_package: vork2
+  publish_sensors: true
+schema:
+  sensor_source: str
+  sensor_mode: str
+  sensor_powerlimit: str?
+  sensor_grid_power:
+    - str
+  sensor_nordpool: str
+  kratt_share: float(0,1)
+  afrr_price_up_eur_mwh: float
+  afrr_price_down_eur_mwh: float
+  mfrr_price_area: list(Estonia|Latvia|Lithuania)
+  mfrr_price_recheck_min: float?
+  entsoe_token: password?
+  entsoe_cbmp_area: str?
+  fee_network_package: list(vork1|vork2|vork4|vork5|custom)
+  fee_margin: float?
+  fee_taastuv: float?
+  fee_aktsiis: float?
+  fee_tasakaal: float?
+  fee_varustus: float?
+  fee_elektrilevi_day: float?
+  fee_elektrilevi_night: float?
+  fee_vat: float?
+  fee_export_margin: float?
+  fee_export_tasakaal: float?
+  publish_sensors: bool

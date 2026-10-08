@@ -2,7 +2,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import './App.css';
 
-const API_BASE = ""; // same origin: the backend serves this UI (vite dev proxies /api)
+// Relative, so the UI also works under a path prefix (Home Assistant Ingress); vite dev proxies /api
+const API_BASE = ".";
 
 // Column explanations shown by <Hint>
 const HINTS = {

@@ -16,6 +16,7 @@ import mffr_price_updater
 import backfill
 import qw_report
 import fees
+import config
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -32,7 +33,7 @@ async def lifespan(app: FastAPI):
             scheduler.shutdown(wait=False)
 
 app = FastAPI(lifespan=lifespan)
-DB_FILE = "data/mffr.db"
+DB_FILE = config.DB_PATH
 STATIC_DIR = "static"   # built frontend (copied in by the Dockerfile)
 
 LOCAL_TZ = pytz.timezone(os.getenv("TZ", "Europe/Tallinn"))
@@ -99,23 +100,10 @@ def get_mffr_data(
         print(f"DB query failed: where='{where_clause}' args={params} err={e}")
         raise
 
-    # Variant with seller and network fees, computed with the current fee settings so edits
-    # apply instantly (the stored grid_cost / net_total are spot + VAT only)
+    # Variant with seller and network fees, computed with the current fee settings
     fee_values = fees.get_fees(_db)
     for row in rows:
-        slot = row.get("price_timeslot") or row.get("timeslot")
-        row["tariff_period"] = fees.network_period(datetime.fromisoformat(slot), fee_values) if slot else None
-        bill = fees.bill_effect(row, with_fees=True, fees=fee_values) if row.get("profit") is not None else None
-        if bill is None:
-            row["grid_cost_fees"] = row["net_total_fees"] = row["price_per_kwh_fees"] = row["fees_eur"] = None
-            continue
-        # What seller and network fees add (−) or save (+) on top of the spot + VAT bill effect
-        row["fees_eur"] = round(bill + (row.get("grid_cost") or 0.0), 5)
-        net = row["profit"] + bill
-        energy = row.get("energy_kwh") or 0.0
-        row["grid_cost_fees"] = round(-bill, 5)
-        row["net_total_fees"] = round(net, 5)
-        row["price_per_kwh_fees"] = round(net / energy, 5) if energy > 0 else None
+        fees.add_fee_columns(row, fee_values)
 
     # One row per slot, market and direction, keyed by id
     return {row["id"]: row for row in rows}

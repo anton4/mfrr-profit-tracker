@@ -7,7 +7,9 @@ from datetime import datetime
 import pytz
 from sqlite_utils import Database
 
-DB_PATH = "data/mffr.db"
+import config
+
+DB_PATH = config.DB_PATH
 tz = pytz.timezone("Europe/Tallinn")
 
 # Idle readings averaged into the snapshot (smooths sensor noise; ~6 reads at 10 s)

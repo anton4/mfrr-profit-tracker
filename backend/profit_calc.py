@@ -5,8 +5,9 @@ import pytz
 from sqlite_utils import Database
 
 import fees
+import config
 
-DB_PATH = "data/mffr.db"
+DB_PATH = config.DB_PATH
 tz = pytz.timezone("Europe/Tallinn")
 
 # ---- Tunables (can be overridden via env) ----
