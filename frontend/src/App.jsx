@@ -24,7 +24,7 @@ const HINTS = {
   minutes: 'Minutes this direction was commanded within the slot.',
   kratt: 'Official regulated energy (kWh) and your share (€) for this slot and direction, from the imported Qilowatt revenue report.',
   price: 'Balancing energy price used for income in this direction: mFRR from the Baltic Transparency Dashboard. aFRR uses Volton when published, otherwise an estimate ("est.") calibrated on Kratt reports. "market" = the real aFRR market price (CBMP) during this activation, for comparison.',
-  cbmp: 'Real Estonian aFRR cross-border marginal price (CBMP): the average of the 4-second prices published while this activation ran (from newday.ee). Kratt has paid 1.3–3× this in its reports, so income keeps using the estimate or the imported report.',
+  cbmp: 'Real Estonian aFRR cross-border marginal price (CBMP): the average of the 4-second prices published while this activation ran (from ENTSO-E, PICASSO). Kratt has paid 1.3–3× this in its reports, so income keeps using the estimate or the imported report.',
   grid: 'Net grid energy during the activation: + import, − export.',
   energyEur: 'Change in your electricity bill at spot price (plus VAT on import) compared with staying at the baseline: extra import costs, extra export earns, avoided import saves.',
   feesEur: 'What network and seller fees add (−) or save (+) for this activation on top of Energy €: network tariff, renewable energy, excise, balancing and security of supply fees, seller margin (with VAT) and export fees. Counted in Net only when Fees is on.',
@@ -650,8 +650,8 @@ function App() {
                 {priceSync.afrr_estimated_slots > 0 ? `${priceSync.afrr_estimated_slots} slot(s) estimated` : 'no estimated prices'}
                 {priceSync.afrr_last_check_at && ` · Volton checked ${hm(priceSync.afrr_last_check_at)}`}
                 {priceSync.cbmp_configured
-                  ? ` · market price (CBMP) from newday.ee${priceSync.cbmp_last_check_at ? ` checked ${hm(priceSync.cbmp_last_check_at)}` : ''}`
-                  : ' · market price: newday.ee not configured'}
+                  ? ` · market price (CBMP) from ENTSO-E${priceSync.cbmp_last_check_at ? ` checked ${hm(priceSync.cbmp_last_check_at)}` : ''}`
+                  : ' · market price: ENTSO-E token not set'}
                 {priceSync.cbmp_last_error && <span className="err"> · {priceSync.cbmp_last_error}</span>}
               </span>
             </div>

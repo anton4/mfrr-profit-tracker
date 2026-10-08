@@ -6,7 +6,7 @@ import pytz
 import time
 import os
 
-import newday
+import entsoe_cbmp
 
 DB_PATH = "data/mffr.db"
 LOG_PATH = "logs/mffr_price_fetch_errors.log"
@@ -40,7 +40,8 @@ sync_status = {
     "afrr_last_error": None,
     "afrr_estimated_slots": 0,
     # aFRR market price (CBMP) shown for comparison; income keeps the estimate
-    "cbmp_configured": newday.configured(),
+    "cbmp_source": entsoe_cbmp.SOURCE,
+    "cbmp_configured": entsoe_cbmp.configured(),
     "cbmp_last_check_at": None,
     "cbmp_last_error": None,
 }
@@ -52,6 +53,8 @@ AFRR_MAX_AGE = timedelta(days=3)    # stop looking for a published price after t
 
 # Ensure log folder exists
 os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
+os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+entsoe_cbmp.migrate()
 
 def log_error(message):
     with open(LOG_PATH, "a") as f:
@@ -219,9 +222,9 @@ def update_afrr_prices():
         print(f"✅ Set Volton aFRR price for {updated} slot(s)")
 
 def update_afrr_cbmp():
-    """Fill the aFRR market price (newday.ee CBMP) on finished aFRR rows, on demand.
+    """Fill the aFRR market price (ENTSO-E PICASSO CBMP) on finished aFRR rows, on demand.
     Never touches mffr_price / profit: the income stays on the estimate, Volton or the report."""
-    if not newday.configured():
+    if not entsoe_cbmp.configured():
         return
     db = sqlite_utils.Database(DB_PATH)
     if "slots" not in db.table_names():
@@ -235,19 +238,19 @@ def update_afrr_cbmp():
         return
     sync_status["cbmp_last_check_at"] = now.isoformat()
     try:
-        updated = newday.fill_rows(db, rows)
+        updated = entsoe_cbmp.fill_rows(db, rows)
         sync_status["cbmp_last_error"] = None
         if updated:
             print(f"✅ Set aFRR market price (CBMP) on {updated} row(s)")
     except Exception as e:
         sync_status["cbmp_last_error"] = str(e)
-        log_error(f"❌ newday.ee CBMP: {e}")
+        log_error(f"❌ ENTSO-E CBMP: {e}")
 
 scheduler.add_job(
     update_afrr_cbmp,
     "interval",
     id="afrr_cbmp",
-    minutes=5,
+    minutes=30,                       # today's prices are re-fetched at most hourly (TODAY_REFRESH)
     next_run_time=datetime.now(tz),   # also right after startup
     max_instances=1,
     coalesce=True
