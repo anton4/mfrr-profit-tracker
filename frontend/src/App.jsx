@@ -1021,6 +1021,12 @@ function App() {
               <span className="muted small">{backfill.phase} · {backfill.progress}%</span>
             </div>
           )}
+          {backfillRunning && (
+            <div className="muted small">
+              You can leave this page: the backfill keeps running in the add-on, and its progress shows here and on the
+              Data tools button when you come back.
+            </div>
+          )}
           {backfill?.state === 'done' && (
             <div className="ok small">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg>
@@ -1031,6 +1037,7 @@ function App() {
           {backfillError && <div className="err small">{backfillError}</div>}
           <div className="muted small">
             Replays Home Assistant history through the tracker; rows in the range are recomputed. History is kept for <code>purge_keep_days</code> (10 days by default).
+            The backfill runs in the add-on, so you can close this page or go elsewhere while it works.
           </div>
         </div>
         <div className="divider" />
