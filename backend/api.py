@@ -5,6 +5,7 @@ from typing import Optional
 from datetime import datetime
 
 import pytz
+import requests
 from fastapi import Body, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -16,6 +17,7 @@ import mffr_price_updater
 import backfill
 import qw_report
 import fees
+import addon_config
 import config
 import entsoe_cbmp
 import ha
@@ -109,82 +111,69 @@ def get_mffr_data(
         raise
 
     # Variant with seller and network fees, computed with the current fee settings
-    fee_values = fees.get_fees(_db)
+    fee_values = fees.get_fees()
     for row in rows:
         fees.add_fee_columns(row, fee_values)
 
     # One row per slot, market and direction, keyed by id
     return {row["id"]: row for row in rows}
 
-@app.get("/api/fees")
-def get_fee_settings():
-    """Seller and network fees (cents/kWh excl. VAT; VAT in %) used for the 'with fees' figures."""
-    return {
-        "values": fees.get_fees(),
-        "defaults": fees.DEFAULTS,
-        "labels": {k: label for k, (label, _) in fees.FIELDS.items()},
-        "packages": fees.PACKAGES,
-        "network_keys": list(fees.NETWORK_KEYS),
-        "unit": "s/kWh",
-    }
-
-@app.put("/api/fees")
-def put_fee_settings(payload: dict = Body(...)):
-    try:
-        return {"values": fees.save_fees(payload)}
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-
-def _sensor_settings(states: list[dict] | None = None) -> dict:
-    """Sensors in use, their problems, and the HA sensors to pick from."""
-    states = states if states is not None else ha.get_states()
-    values, saved = sensors.load()
+@app.get("/api/sensors")
+def get_sensor_status():
+    """Configured sensors, the ones Home Assistant doesn't have, and HA's sensors to pick from."""
+    states = ha.get_states()
     entities = sorted(
         ({
             "entity_id": st["entity_id"],
             "name": st.get("attributes", {}).get("friendly_name"),
             "state": st.get("state"),
             "unit": st.get("attributes", {}).get("unit_of_measurement"),
-            "power": ha.is_power_sensor(st),
-            "price": "raw_today" in st.get("attributes", {}),   # what main reads from Nord Pool
         } for st in states or [] if st["entity_id"].startswith("sensor.")),
         key=lambda e: e["entity_id"],
     )
     return {
-        "values": values,
-        "defaults": sensors.DEFAULTS,
-        "saved": saved,
-        "labels": {k: label for k, (label, _, _) in sensors.FIELDS.items()},
-        "kinds": {k: kind for k, (_, _, kind) in sensors.FIELDS.items()},
-        "optional": sorted(sensors.OPTIONAL),
-        "lists": sorted(sensors.LISTS),
-        "problems": sensors.problems({st["entity_id"] for st in states}, values) if states is not None else [],
+        "values": sensors.current(),
+        "problems": sensors.problems({st["entity_id"] for st in states}) if states is not None else [],
         "entities": entities,
         "ha_error": None if states is not None else "Can't reach Home Assistant",
     }
 
-@app.get("/api/sensors")
-def get_sensor_settings():
-    """Home Assistant entities the tracker reads; picked in the UI or from the add-on options."""
-    return _sensor_settings()
+def _through_ingress(request: Request) -> bool:
+    return request.client is not None and request.client.host == addon_config.INGRESS_IP
 
-@app.put("/api/sensors")
-def put_sensor_settings(payload: dict = Body(...)):
-    states = ha.get_states()
-    if states is None:
-        raise HTTPException(502, "Can't reach Home Assistant to check the sensors")
+@app.get("/api/config")
+def get_config(request: Request):
+    """The add-on options as YAML for the Configuration editor (passwords masked)."""
+    if not addon_config.available():
+        return {"editable": False, "yaml": None,
+                "message": "Standalone install: the configuration is in .env. Restart the container after changing it."}
+    if not _through_ingress(request):
+        return {"editable": False, "yaml": None,
+                "message": "Open the tracker from the Home Assistant sidebar to see and edit its configuration."}
     try:
-        sensors.save(payload, {st["entity_id"] for st in states})
+        return {"editable": True, "yaml": addon_config.to_yaml(addon_config.get_options()), "message": None}
+    except (ValueError, requests.RequestException) as e:
+        raise HTTPException(502, f"Can't read the add-on configuration: {e}")
+
+# POST rather than PUT: reverse proxies in front of Home Assistant often allow only GET and POST
+@app.post("/api/config")
+def save_config(request: Request, payload: dict = Body(...)):
+    """Store the add-on options and restart the add-on to apply them."""
+    if not addon_config.available() or not _through_ingress(request):
+        raise HTTPException(403, "The configuration can only be changed from the Home Assistant sidebar")
+    try:
+        current = addon_config.get_options()
+    except (ValueError, requests.RequestException) as e:
+        raise HTTPException(502, f"Can't read the add-on configuration: {e}")
+    try:
+        addon_config.save_options(addon_config.from_yaml(str(payload.get("yaml") or ""), current))
     except ValueError as e:
         raise HTTPException(400, str(e))
-    print(f"🔌 Sensors picked in the UI: {sensors.describe()}")
-    return _sensor_settings(states)
-
-@app.delete("/api/sensors")
-def reset_sensor_settings():
-    sensors.reset()
-    print(f"🔌 Sensors reset to the add-on options: {sensors.describe()}")
-    return _sensor_settings()
+    except requests.RequestException as e:
+        raise HTTPException(502, f"Can't reach the Supervisor: {e}")
+    print("⚙️ Configuration saved in the tracker's UI, restarting the add-on")
+    addon_config.restart_soon()
+    return {"restarting": True}
 
 @app.get("/api/version")
 def get_version():

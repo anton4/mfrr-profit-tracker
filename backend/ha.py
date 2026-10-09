@@ -41,7 +41,7 @@ def get_entity(entity_id: str) -> dict | None:
         return None
     if resp.status_code == 404:
         _fetch_failed(entity_id, f"{entity_id} doesn't exist in Home Assistant (404). "
-                                 "Pick the right sensor under Data tools → Sensors")
+                                 "Set the right sensor in the add-on configuration")
         return None
     if not resp.ok:
         _fetch_failed(entity_id, f"Failed to fetch {entity_id}: {resp.status_code}")
@@ -71,22 +71,20 @@ def is_power_sensor(entity: dict) -> bool:
 
 def log_sensor_check() -> None:
     """On start: print the sensors in use, and which of them Home Assistant doesn't have."""
-    values, picked = sensors.load()
-    print(f"🔌 Sensors {'picked in the UI' if picked else 'from the add-on options'}: {sensors.describe(values)}")
+    print(f"🔌 Sensors: {sensors.describe()}")
     states = get_states()
     if states is None:
         return
-    problems = sensors.problems({s["entity_id"] for s in states}, values)
+    problems = sensors.problems({s["entity_id"] for s in states})
     for p in problems:
-        label = sensors.FIELDS[p["field"]][0]
-        print(f"❌ {label}: not set" if p["error"] == "not set"
-              else f"❌ {label}: {p['entity_id']} doesn't exist in Home Assistant")
+        print(f"❌ {p['option']}: not set" if p["error"] == "not set"
+              else f"❌ {p['option']}: {p['entity_id']} doesn't exist in Home Assistant")
     if any(sensors.FIELDS[p["field"]][2] == "power" for p in problems):
         power = sorted(s["entity_id"] for s in states if is_power_sensor(s))
         shown = ", ".join(power[:20]) + (f" … and {len(power) - 20} more" if len(power) > 20 else "")
         print(f"   Power sensors in Home Assistant: {shown or 'none'}")
     if problems:
-        print("   Pick the sensors in the tracker's UI under Data tools → Sensors")
+        print("   Set the sensors in the add-on configuration (Data tools → Configuration), or in .env standalone")
 
 
 # Every reader takes an optional `fetch` (entity_id → HA state dict). Live reads use get_entity;

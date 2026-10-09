@@ -23,7 +23,7 @@ def run_profit_calculation():
     db = Database(DB_PATH)
     now = datetime.now(tz)
     updated = False
-    fee_values = fees.get_fees(db)
+    fee_values = fees.get_fees()
 
     # Only (re)compute finished slots
     for row in db["slots"].rows_where("profit IS NULL OR net_total IS NULL"):

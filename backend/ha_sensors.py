@@ -50,7 +50,7 @@ def build_states(db: Database, now: datetime | None = None) -> dict[str, tuple]:
     day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     month_start = day_start.replace(day=1)
 
-    fee_values = fees.get_fees(db)
+    fee_values = fees.get_fees()
     rows = [fees.add_fee_columns(r, fee_values)
             for r in db["slots"].rows_where("energy_kwh > 0", order_by="timeslot desc")]
     today = _totals([r for r in rows if r["timeslot"] >= day_start.isoformat()])

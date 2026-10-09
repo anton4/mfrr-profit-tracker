@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.4.0
+
+- All settings live in one place: the add-on options. **Data tools → Configuration** in the tracker edits them as YAML, with a search to insert sensor IDs, and **Save & restart** applies them. The separate Sensors and Electricity fees editors in the tracker are gone.
+- Sensors and fees you saved in the tracker's UI are moved into the add-on options on the first start, and the log lists what was moved.
+- New options `fee_elektrilevi_day_peak` and `fee_elektrilevi_holiday_peak` for a custom network package with peak hours.
+
 ## 1.3.2
 
 - The page header shows the version of the page you're looking at. If the browser still shows a page cached from an older version, a **Version … is installed** notice appears; click it to load the current page.

@@ -7,8 +7,10 @@
 import json
 import os
 import shutil
+import sqlite3
 import sys
 import threading
+from contextlib import closing
 from datetime import datetime
 
 import pytz
@@ -84,10 +86,78 @@ def load_addon_options(path: str = OPTIONS_FILE) -> None:
     print(f"🏠 Running as Home Assistant add-on (HA at {os.environ['HA_URL']}, data in {os.environ['DATA_DIR']})")
 
 
+def _saved_settings(db_path: str) -> dict:
+    """Sensors and fees saved in the tracker's UI before 1.4.0: {"sensors": {...}, "fees": {...}}."""
+    if not os.path.isfile(db_path):
+        return {}
+    with closing(sqlite3.connect(db_path)) as conn:
+        try:
+            rows = conn.execute("SELECT key, value FROM settings WHERE key IN ('sensors', 'fees')").fetchall()
+        except sqlite3.OperationalError:   # no settings table
+            return {}
+    return {key: json.loads(value) for key, value in rows}
+
+
+def _changed_options(saved: dict) -> dict:
+    """The saved settings as add-on options, where they differ from the configuration in effect."""
+    import fees   # reads FEE_* at import; dropped again below so the app imports it afresh
+    options = {}
+    for key, value in (saved.get("sensors") or {}).items():
+        env = os.getenv(f"SENSOR_{key.upper()}", "")
+        current = [e.strip() for e in env.split(",") if e.strip()] if isinstance(value, list) else env
+        if value and value != current:
+            options[f"sensor_{key}"] = value
+    saved_fees = saved.get("fees") or {}
+    package = saved_fees.get("network_package", fees.DEFAULTS["network_package"])
+    if package in fees.PACKAGES and package != fees.DEFAULTS["network_package"]:
+        options["fee_network_package"] = package
+    for key, (_, fallback) in fees.FIELDS.items():
+        value = saved_fees.get(key)
+        if key in fees.NETWORK_KEYS:
+            if package != "custom":
+                continue   # a preset package brings its own network rates
+            current = fees._default(key, fallback)
+        else:
+            current = fees.DEFAULTS[key]
+        if isinstance(value, (int, float)) and abs(value - current) > 1e-9:
+            options[f"fee_{key}"] = float(value)
+    del sys.modules["fees"]
+    return options
+
+
+def move_app_settings() -> None:
+    """Configuration lives only in the add-on options (.env standalone). Settings an older version
+    saved in the app move there once, and apply to this run either way."""
+    import addon_config
+    db_path = os.path.join(os.getenv("DATA_DIR", "data"), "mffr.db")
+    saved = _saved_settings(db_path)
+    if not saved:
+        return
+    options = _changed_options(saved)
+    for key, value in options.items():
+        os.environ[key.upper()] = _env_value(value) or ""
+    if options and not addon_config.available():
+        # Kept until .env has the same values, so nothing is lost
+        print("⚠️ Using settings saved in the app by an older version. Put them in .env:")
+        for key, value in options.items():
+            print(f"   {key.upper()}={_env_value(value) or ''}")
+        return
+    if options:
+        try:
+            addon_config.save_options({**addon_config.get_options(), **options})
+        except Exception as e:
+            print(f"❌ Couldn't move the settings saved in the app into the add-on configuration: {e}")
+            return
+        print(f"📦 Moved settings saved in the app into the add-on configuration: {', '.join(options)}")
+    with closing(sqlite3.connect(db_path)) as conn, conn:
+        conn.execute("DELETE FROM settings WHERE key IN ('sensors', 'fees')")
+
+
 if __name__ == "__main__":
     timestamp_output()
     print(f"🚀 mFRR Profit Tracker {os.getenv('TRACKER_VERSION', 'dev')}")
     if os.path.isfile(OPTIONS_FILE):
         load_addon_options()
+    move_app_settings()
     # In-process, so uvicorn's log handlers write to the timestamped stderr
     uvicorn.run("api:app", host="0.0.0.0", port=8000)

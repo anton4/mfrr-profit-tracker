@@ -8,17 +8,12 @@
 # Peak rates (Elektrilevi Võrk 5, or a custom package with peak prices), November–March only:
 #   day peak: working days 09–12 and 16–20; weekend peak: weekends and holidays 16–20.
 # Fee values are cents/kWh excluding VAT; spot prices are €/kWh.
-import json
 import os
 from datetime import date, datetime, timedelta
 from functools import lru_cache
 
 import pytz
-from sqlite_utils import Database
 
-import config
-
-DB_PATH = config.DB_PATH
 tz = pytz.timezone("Europe/Tallinn")
 
 # Defaults (s/kWh excl. VAT, Oct 2026): Elering taastuvenergia tasu 0.84, elektriaktsiis
@@ -79,49 +74,9 @@ if PACKAGES[DEFAULT_PACKAGE]["rates"]:
 DEFAULTS["network_package"] = DEFAULT_PACKAGE
 
 
-def get_fees(db: Database | None = None) -> dict:
-    """Defaults overlaid with the values saved from the UI."""
-    db = db or Database(DB_PATH)
-    values = dict(DEFAULTS)
-    if "settings" in db.table_names():
-        try:
-            saved = json.loads(db["settings"].get("fees")["value"])
-            values.update({k: float(v) for k, v in saved.items() if k in FIELDS})
-            if saved.get("network_package") in PACKAGES:
-                values["network_package"] = saved["network_package"]
-        except Exception:
-            pass
-    # A preset package always uses its own network prices
-    rates = PACKAGES[values["network_package"]]["rates"]
-    if rates:
-        values.update(rates)
-    return values
-
-
-def save_fees(values: dict, db: Database | None = None) -> dict:
-    """Validate and store fee values (s/kWh, VAT in %). Raises ValueError on bad input."""
-    clean = {}
-    for key, value in values.items():
-        if key == "network_package":
-            if value not in PACKAGES:
-                raise ValueError(f"Unknown network package '{value}'")
-            clean[key] = value
-            continue
-        if key not in FIELDS:
-            raise ValueError(f"Unknown fee '{key}'")
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            raise ValueError(f"'{key}' must be a number")
-        low, high = (0.0, 100.0) if key == "vat" else (-100.0, 100.0)
-        if not low <= value <= high:
-            raise ValueError(f"'{key}' must be between {low:g} and {high:g}")
-        clean[key] = float(value)
-    db = db or Database(DB_PATH)
-    merged = {**get_fees(db), **clean}
-    rates = PACKAGES[merged["network_package"]]["rates"]
-    if rates:
-        merged.update(rates)
-    db["settings"].upsert({"key": "fees", "value": json.dumps(merged)}, pk="key")
-    return merged
+def get_fees() -> dict:
+    """Fee settings from the add-on options (FEE_* in a standalone .env)."""
+    return dict(DEFAULTS)
 
 
 # ---- time of use ----
