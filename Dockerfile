@@ -26,5 +26,10 @@ COPY backend/ .
 COPY --from=ui /ui/dist ./static
 RUN mkdir -p data logs
 
+# Version shown in the log: passed by the image workflow, and by the Supervisor for a local build.
+# Declared last, so a new version doesn't invalidate the cached layers above.
+ARG BUILD_VERSION=dev
+ENV TRACKER_VERSION=${BUILD_VERSION}
+
 # start.py maps Home Assistant add-on options to env vars, then runs uvicorn
 CMD ["python", "start.py"]
