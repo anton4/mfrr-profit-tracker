@@ -2,20 +2,26 @@
 //
 // One axis (W): measured grid power, Kratt's target (baseline ± requested) where the window is
 // detailed enough, and the commands as UP/DOWN bands (aFRR striped, mFRR solid). Each legend entry
-// hides or shows its part of the graph. Live follows now from the tracker's own readings; any
-// other window comes from Home Assistant (/api/graph: 10 s history up to 6 h, 5-minute or hourly
-// statistics beyond). Navigate with the presets, ◀ ▶, Go to, the 7-day overview strip, scrolling
-// or pinch (zoom), dragging (zoom to the selected range), Shift-drag, sideways scroll or a touch
-// drag (pan) and double-click (zoom out). Hover or arrow keys read values; the table view lists them.
+// hides or shows its part of the graph. The graph window is the page's period: a period picked at
+// the top frames the graph (live from its start while it reaches now), and moving the graph sets
+// the period to Custom with its window once it settles. Live follows now from the tracker's own
+// readings up to 2 h; any other window comes from Home Assistant (/api/graph: 10 s history up to
+// 6 h, 5-minute or hourly statistics beyond). Navigate with the presets, ◀ ▶, Go to, the overview
+// strip, scrolling or pinch (zoom), dragging (zoom to the selected range), Shift-drag, sideways
+// scroll or a touch drag (pan) and double-click (zoom out). Hover or arrow keys read values; the
+// table view lists them.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 const POLL_MS = 10000;
 const LIVE_REFRESH_MS = 60000;      // wider live windows come from Home Assistant
+const STATS_REFRESH_MS = 300000;    // live windows over DETAIL_SPAN use 5-minute or hourly means
 const OVERVIEW_REFRESH_MS = 600000;
+const REPORT_MS = 600;              // the graph sets the page period once a move settles
 const MIN = 60000;
 const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
 const LIVE_SPAN = 2 * HOUR;         // what the tracker keeps in memory
+const DETAIL_SPAN = 6 * HOUR;       // longest window with 10-second history
 const MIN_SPAN = 5 * MIN;
 const MAX_SPAN = 31 * DAY;
 const PRESETS = [['15 min', 15 * MIN], ['1 h', HOUR], ['2 h', 2 * HOUR], ['6 h', 6 * HOUR], ['24 h', DAY], ['7 d', 7 * DAY]];
@@ -84,6 +90,14 @@ function Hatches({ id }) {
 const bandProps = (b, id) => (b.market === 'AFRR'
   ? { className: 'live-band', fill: `url(#${id}-${b.signal})` }
   : { className: `live-band live-band-${b.signal}` });
+// The view that shows a period: All as the last 31 days, live from the start while the period
+// reaches now (to = null), else the fixed window (its last 31 days at most)
+const fitPeriod = (p) => {
+  if (!p || p.from === null) return { live: true, span: MAX_SPAN };
+  if (p.to === null) return { live: true, from: p.from };
+  const start = Math.max(p.from, p.to - MAX_SPAN);
+  return { live: false, start, end: Math.max(p.to, start + MIN_SPAN) };
+};
 // Which parts of the graph the legend has hidden (remembered per browser)
 const HIDDEN_KEY = 'graph-hidden';
 const loadHidden = () => {
@@ -368,7 +382,7 @@ function PowerChart({ data, bands, hidden, start, end, resolution, loading, onVi
   );
 }
 
-// The last 7 days, small: click or drag to move the graph there
+// The last 7 days (or back to the view when it starts earlier), small: click or drag to move the graph there
 function OverviewStrip({ data, bands, start, end, viewStart, viewEnd, onCenter }) {
   const [wrapRef, width] = useWidth();
   const dragging = useRef(false);
@@ -395,10 +409,11 @@ function OverviewStrip({ data, bands, start, end, viewStart, viewEnd, onCenter }
   const b1 = Math.min(PAD.left + plotW, x(viewEnd));
   const days = [];
   for (let t = new Date(start).setHours(24, 0, 0, 0); t < end; t += DAY) days.push(t);
+  const labelEvery = Math.max(1, Math.ceil((days.length * 64) / plotW));   // day labels need ~64 px
   return (
     <div ref={wrapRef} className="live-overview">
       <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} role="slider" tabIndex={0}
-        aria-label="Last 7 days: click or drag to move the graph there, arrow keys to step" aria-valuemin={start} aria-valuemax={end}
+        aria-label={`${stamp(start)} – ${stamp(end)}: click or drag to move the graph there, arrow keys to step`} aria-valuemin={start} aria-valuemax={end}
         aria-valuenow={Math.round((viewStart + viewEnd) / 2)} aria-valuetext={stamp((viewStart + viewEnd) / 2)}
         onPointerDown={(e) => { dragging.current = true; e.currentTarget.setPointerCapture(e.pointerId); centerAt(e); }}
         onPointerMove={(e) => { if (dragging.current) centerAt(e); }}
@@ -414,10 +429,10 @@ function OverviewStrip({ data, bands, start, end, viewStart, viewEnd, onCenter }
             {...bandProps(b, 'overview-hatch')} />
         ))}
         <path d={d} className="live-line live-overview-line" />
-        {days.map((t) => (
+        {days.map((t, i) => (
           <g key={t}>
             <line x1={x(t)} x2={x(t)} y1={4} y2={height - 14} className="live-grid" />
-            <text x={x(t) + 3} y={height - 3} className="live-tick">{dayLabel(t)}</text>
+            {i % labelEvery === 0 && <text x={x(t) + 3} y={height - 3} className="live-tick">{dayLabel(t)}</text>}
           </g>
         ))}
         {b1 > b0 && <rect x={b0} y={2} width={Math.max(3, b1 - b0)} height={height - 14} className="live-brush" />}
@@ -426,12 +441,13 @@ function OverviewStrip({ data, bands, start, end, viewStart, viewEnd, onCenter }
   );
 }
 
-export default function LiveView({ apiBase, focus }) {
+export default function LiveView({ apiBase, focus, period, onPeriod }) {
   const cardRef = useRef(null);
   const [live, setLive] = useState(null);
   const [failed, setFailed] = useState(false);
-  // What the graph shows: live (follows now) for a span, or a fixed window
-  const [view, setView] = useState({ live: true, span: LIVE_SPAN });
+  // What the graph shows: live (follows now) for a span or from a start, or a fixed window
+  const [view, setView] = useState(() => fitPeriod(period));
+  const [peek, setPeek] = useState(false);   // showing an activation without changing the period
   const [range, setRange] = useState(null);       // /api/graph response for the view
   const [loading, setLoading] = useState(false);
   const [rangeError, setRangeError] = useState(null);
@@ -470,43 +486,79 @@ export default function LiveView({ apiBase, focus }) {
       .finally(() => { if (id === request.current) setLoading(false); });
   }, [apiBase]);
 
+  const liveData = useMemo(() => prepare(live?.points ?? []), [live]);
+  const rangeData = useMemo(() => prepare(range?.points ?? []), [range]);
+  const now = liveData.length ? liveData[liveData.length - 1].ms : (live?.updated_at ? Date.parse(live.updated_at) : null);
+  // A live view from a start covers that start to now, within [MIN_SPAN, MAX_SPAN]
+  const liveStart = (nowMs) => (view.from !== undefined
+    ? Math.min(Math.max(view.from, nowMs - MAX_SPAN), nowMs - MIN_SPAN) : nowMs - view.span);
+  const end = view.live ? now : view.end;
+  const start = view.live ? (now === null ? null : liveStart(now)) : view.start;
+
   // Fetch the window once it settles (panning and zooming change it many times a second)
-  const liveFromMemory = view.live && view.span <= LIVE_SPAN;
+  const liveFromMemory = view.live && (start === null || now - start <= LIVE_SPAN);
   useEffect(() => {
     if (liveFromMemory) return undefined;
-    const fetchNow = () => (view.live ? loadGraph(Date.now() - view.span, Date.now()) : loadGraph(view.start, view.end));
+    const fetchNow = () => (view.live ? loadGraph(liveStart(Date.now()), Date.now()) : loadGraph(view.start, view.end));
     const timer = setTimeout(fetchNow, 300);
-    const refresh = view.live ? setInterval(fetchNow, LIVE_REFRESH_MS) : null;
+    const every = view.live && Date.now() - liveStart(Date.now()) > DETAIL_SPAN ? STATS_REFRESH_MS : LIVE_REFRESH_MS;
+    const refresh = view.live ? setInterval(fetchNow, every) : null;
     return () => { clearTimeout(timer); if (refresh) clearInterval(refresh); };
+    // liveStart only reads view
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, liveFromMemory, loadGraph]);
 
-  // The 7-day overview strip
+  // The overview strip: the last 7 days, or from the day the view starts when that is earlier
+  // (31 days at most); refetched when that day changes
+  const stripFrom = now === null ? null : new Date(Math.min(now - 7 * DAY, start ?? now)).setHours(0, 0, 0, 0);
+  const stripTo = stripFrom !== null && now - stripFrom > MAX_SPAN ? stripFrom + MAX_SPAN : null;   // null = now
   useEffect(() => {
+    if (stripFrom === null) return undefined;
     const load = () => {
-      const q = new URLSearchParams({ from: new Date(Date.now() - 7 * DAY).toISOString(), to: new Date().toISOString() });
+      const q = new URLSearchParams({ from: new Date(stripFrom).toISOString(), to: new Date(stripTo ?? Date.now()).toISOString() });
       fetch(`${apiBase}/api/graph?${q}`).then((res) => (res.ok ? res.json() : null)).then((d) => { if (d) setOverview(d); }).catch(() => {});
     };
     load();
-    const refresh = setInterval(load, OVERVIEW_REFRESH_MS);
-    return () => clearInterval(refresh);
-  }, [apiBase]);
+    const refresh = stripTo === null ? setInterval(load, OVERVIEW_REFRESH_MS) : null;
+    return () => { if (refresh) clearInterval(refresh); };
+  }, [apiBase, stripFrom, stripTo]);
 
-  // "Show in graph" from an activation: the window around it (a new focus object each click)
+  // The period picked at the top frames the graph; a period the graph reported itself doesn't move it
+  const [shownPeriod, setShownPeriod] = useState(period?.key);
+  if (period && period.key !== shownPeriod) {
+    setShownPeriod(period.key);
+    if (period.source !== 'graph') {
+      setView(fitPeriod(period));
+      setPeek(false);
+    }
+  }
+  // The user's own moves set the page period once they settle; any other view change cancels that
+  const userMoved = useRef(false);
+  const report = useRef(onPeriod);
+  useEffect(() => { report.current = onPeriod; });
+  useEffect(() => {
+    if (!userMoved.current) return undefined;
+    userMoved.current = false;
+    const timer = setTimeout(() => {
+      if (!view.live) report.current?.(view.start, view.end);
+      else report.current?.(view.from !== undefined ? view.from : Date.now() - view.span, null);
+    }, REPORT_MS);
+    return () => clearTimeout(timer);
+  }, [view]);
+
+  // "Show in graph" from an activation: the window around it (a new focus object each click),
+  // without changing the period
   const [shownFocus, setShownFocus] = useState(null);
   if (focus && focus !== shownFocus) {
     setShownFocus(focus);
     const s = Date.parse(focus.start) - 10 * MIN;
     setView({ live: false, start: s, end: Math.max(Date.parse(focus.end) + 10 * MIN, s + 30 * MIN) });
+    setPeek(true);
   }
   useEffect(() => {
     if (focus) cardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, [focus]);
 
-  const liveData = useMemo(() => prepare(live?.points ?? []), [live]);
-  const rangeData = useMemo(() => prepare(range?.points ?? []), [range]);
-  const now = liveData.length ? liveData[liveData.length - 1].ms : (live?.updated_at ? Date.parse(live.updated_at) : null);
-  const end = view.live ? now : view.end;
-  const start = view.live ? (now === null ? null : now - view.span) : view.start;
   const data = liveFromMemory ? liveData : rangeData;
   const bands = useMemo(() => (liveFromMemory ? bandsFromPoints(liveData) : bandsFromCommands(range?.commands)),
     [liveFromMemory, liveData, range]);
@@ -532,6 +584,12 @@ export default function LiveView({ apiBase, focus }) {
 
   if (!live) return null;
   const span = start !== null ? end - start : view.span;
+  // Every move of the user's own becomes the page period (see the report effect above)
+  const userSetView = (v) => {
+    userMoved.current = true;
+    setPeek(false);
+    setView(v);
+  };
   // Any pan or zoom leaves live mode; the window stays within [MIN_SPAN, MAX_SPAN] and not past now
   const changeView = (s, e) => {
     const width = Math.min(MAX_SPAN, Math.max(MIN_SPAN, e - s));
@@ -539,10 +597,10 @@ export default function LiveView({ apiBase, focus }) {
     let ne = mid + width / 2;
     const latest = now ?? Date.now();
     if (ne > latest) ne = latest;
-    setView({ live: false, start: ne - width, end: ne });
+    userSetView({ live: false, start: ne - width, end: ne });
   };
   const preset = (ms) => {
-    if (view.live) setView({ live: true, span: ms });
+    if (view.live) userSetView({ live: true, span: ms });
     else changeView((start + end) / 2 - ms / 2, (start + end) / 2 + ms / 2);
   };
   const stepBy = (dir) => changeView(start + dir * span, end + dir * span);
@@ -557,6 +615,7 @@ export default function LiveView({ apiBase, focus }) {
   const delivered = last ? last.delivered : null;
   const pct = delivered !== null && live.requested_w ? Math.round((delivered / live.requested_w) * 100) : null;
   const atNow = view.live || (now !== null && end >= now - 1000);
+  const longPeriod = period && (period.from === null || (period.to ?? now) - period.from > MAX_SPAN);
   const overviewData = prepare(overview?.points ?? []);
   // A legend entry is a button that hides or shows its part of the graph
   const entry = (key, mark, label) => (
@@ -616,7 +675,7 @@ export default function LiveView({ apiBase, focus }) {
           </button>
           </span>
           <button type="button" className={`btn-chip ${view.live ? 'on' : ''}`} aria-pressed={view.live}
-            onClick={() => setView({ live: true, span: Math.min(span, 7 * DAY) })}>
+            onClick={() => userSetView({ live: true, span: Math.min(span, 7 * DAY) })}>
             <span className={`dot ${view.live ? 'dot-pos' : 'dot-off'}`} />Live
           </button>
           <form className="live-goto" onSubmit={(e) => { e.preventDefault(); goToTime(); }}>
@@ -645,6 +704,10 @@ export default function LiveView({ apiBase, focus }) {
           {loading && !liveFromMemory && ' · loading…'}
           {range?.notice && !liveFromMemory && <span className="err"> · {range.notice}</span>}
           {rangeError && !liveFromMemory && <span className="err"> · {rangeError}</span>}
+          {!peek && longPeriod && ' · the graph shows the last 31 days of the period'}
+          {peek && period && (
+            <> · <button type="button" className="btn-link" onClick={() => { setView(fitPeriod(period)); setPeek(false); }}>← Back to {period.label}</button></>
+          )}
         </div>
         {overview && overviewStart !== null && start !== null && (
           <OverviewStrip data={overviewData} bands={bandsFromCommands(overview.commands).filter(bandShown(hidden))} start={overviewStart} end={overviewEnd}

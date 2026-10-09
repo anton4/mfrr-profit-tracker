@@ -94,18 +94,30 @@ function App() {
   const [sensorStatus, setSensorStatus] = useState(null);   // { values, problems, entities, ha_error }
   // The add-on options, edited as a form or YAML (Data tools → Configuration)
   const [configOpen, setConfigOpen] = useState(false);
-  // Period: from ?range=… (shareable links), else today
+  // Period: from ?range=… (shareable links; Custom also keeps ?from=…&to=…), else today.
+  // The graph shows the period, and moving the graph sets it to Custom.
   const [filter, setFilterState] = useState(() => {
     const range = new URLSearchParams(window.location.search).get('range');
     return ['today', 'yesterday', 'this_week', 'last_week', 'this_month', 'last_month', 'all', 'custom'].includes(range) ? range : 'today';
   });
-  const setFilter = (value) => {
+  const [customRange, setCustomRange] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return { from: params.get('from') ?? '', to: params.get('to') ?? '' };   // local date-times; empty "to" = now
+  });
+  // Who set the period: the page's own controls move the graph to it, the graph's own moves don't
+  const [periodSource, setPeriodSource] = useState('user');
+  const setPeriod = (value, custom = customRange, source = 'user') => {
     setFilterState(value);
+    setCustomRange(custom);
+    setPeriodSource(source);
     const url = new URL(window.location.href);
     url.searchParams.set('range', value);
+    for (const key of ['from', 'to']) {
+      if (value === 'custom' && custom[key]) url.searchParams.set(key, custom[key]);
+      else url.searchParams.delete(key);
+    }
     window.history.replaceState(null, '', url);
   };
-  const [customRange, setCustomRange] = useState({ from: '', to: '' });
   const [loading, setLoading] = useState(false);
   const [priceSync, setPriceSync] = useState(null);
   // Installed version: differs from UI_VERSION when the browser kept a page cached from an older one
@@ -337,8 +349,8 @@ function App() {
         return [lmStart, lmEnd];
       }
       case 'custom':
-        if (!customRange.from || !customRange.to) return [null, null];
-        return [new Date(customRange.from), new Date(customRange.to)];
+        if (!customRange.from) return [null, null];
+        return [new Date(customRange.from), customRange.to ? new Date(customRange.to) : new Date(now)];
       case 'all':
       default:
         return [null, null];
@@ -353,9 +365,11 @@ function App() {
       setLoading(true);
       try {
         let url = `${API_BASE}/api/mffr`;
+        // From the start of the slot the period starts in, so a slot it overlaps counts
+        const slotFrom = from && new Date(Math.floor(from.getTime() / 900000) * 900000);
         if (from && to) {
           // Send ISO8601 (UTC); backend compares ISO strings safely
-          const qFrom = encodeURIComponent(from.toISOString());
+          const qFrom = encodeURIComponent(slotFrom.toISOString());
           const qTo = encodeURIComponent(new Date(to).toISOString());
           url += `?from=${qFrom}&to=${qTo}`;
         } else if (filter === 'all') {
@@ -369,7 +383,7 @@ function App() {
         const json = await res.json();
         // Official Qilowatt report figures for the same period (if imported)
         const qwUrl = `${API_BASE}/api/qw-report` + (from && to
-          ? `?from=${encodeURIComponent(from.toISOString())}&to=${encodeURIComponent(new Date(to).toISOString())}` : '');
+          ? `?from=${encodeURIComponent(slotFrom.toISOString())}&to=${encodeURIComponent(new Date(to).toISOString())}` : '');
         const qwRes = await fetch(qwUrl).catch(() => null);
         setQwReport(qwRes?.ok ? await qwRes.json() : []);
 
@@ -589,6 +603,25 @@ function App() {
     ['this_month', 'This month'], ['last_month', 'Last month'], ['all', 'All'], ['custom', 'Custom'],
   ];
   const rangeLabel = Object.fromEntries(ranges)[filter] ?? '';
+  // A period button; Custom starts from the period shown now
+  // From/To always show the period (an empty To = now); editing them makes it Custom
+  const shownRange = filter === 'custom' ? customRange
+    : { from: from ? toLocalInput(from) : '', to: to && to < now ? toLocalInput(to) : '' };
+  const choosePeriod = (value) => {
+    if (value === 'custom' && filter !== 'custom') setPeriod('custom', shownRange);
+    else setPeriod(value);
+  };
+  // The graph's own zoom and pan set the period (LiveView reports once a move settles; to = null is now)
+  const setPeriodFromGraph = (fromMs, toMs) => setPeriod('custom',
+    { from: toLocalInput(new Date(fromMs)), to: toMs === null ? '' : toLocalInput(new Date(toMs)) }, 'graph');
+  // What the graph shows: live from the start while the period reaches now (to = null)
+  const graphPeriod = {
+    key: `${filter}|${customRange.from}|${customRange.to}`,
+    from: from ? from.getTime() : null,
+    to: !to || (filter === 'custom' && !customRange.to) || to > now ? null : to.getTime(),
+    source: periodSource,
+    label: rangeLabel,
+  };
   const hasReport = qwReport.length > 0;
   const signalSplit = {
     up: percent(summary.up.count, summary.total.count),
@@ -621,7 +654,7 @@ function App() {
           <div className="toolbar">
             <div className="seg" role="group" aria-label="Period">
               {ranges.map(([value, label]) => (
-                <button key={value} type="button" className={filter === value ? 'on' : ''} aria-pressed={filter === value} onClick={() => setFilter(value)}>
+                <button key={value} type="button" className={filter === value ? 'on' : ''} aria-pressed={filter === value} onClick={() => choosePeriod(value)}>
                   {label}
                 </button>
               ))}
@@ -646,12 +679,10 @@ function App() {
           </div>
         </header>
 
-        {filter === 'custom' && (
-          <div className="custom-range">
-            <label className="field">From<input type="date" value={customRange.from} onChange={(e) => setCustomRange({ ...customRange, from: e.target.value })} /></label>
-            <label className="field">To<input type="date" value={customRange.to} onChange={(e) => setCustomRange({ ...customRange, to: e.target.value })} /></label>
-          </div>
-        )}
+        <div className="custom-range" role="group" aria-label="Period from and to">
+          <label className="field">From<input type="datetime-local" value={shownRange.from} onChange={(e) => setPeriod('custom', { ...shownRange, from: e.target.value })} /></label>
+          <label className="field">To · empty = now<input type="datetime-local" value={shownRange.to} onChange={(e) => setPeriod('custom', { ...shownRange, to: e.target.value })} /></label>
+        </div>
 
         {staleUi && (
           <div className="chips">
@@ -679,7 +710,7 @@ function App() {
         )}
 
         {priceSync && (
-          <div className="chips">
+          <div className="chips chips-stack">
             {syncChip({
               id: 'mfrr', title: 'mFRR prices', source: priceSync.source,
               hint: 'mFRR energy prices from the Baltic Transparency Dashboard, fetched only while a finished mFRR slot is missing its price.',
@@ -712,7 +743,7 @@ function App() {
           </div>
         )}
 
-        <LiveView apiBase={API_BASE} focus={graphFocus} />
+        <LiveView apiBase={API_BASE} focus={graphFocus} period={graphPeriod} onPeriod={setPeriodFromGraph} />
 
         <div className="kpis">
           <div className="card kpi">

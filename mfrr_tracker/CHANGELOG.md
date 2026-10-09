@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.7.0
+
+- The period at the top and the graph are one window. Picking Today, Yesterday, This week, … shows that period in the graph (live while it reaches now; All shows the last 31 days), and zooming or moving the graph sets the period to Custom with the graph's window, so the figures and tables follow the graph.
+- The page opens on Today in the graph too, from midnight to now, instead of the last 2 hours.
+- **From** and **To** show the period's window at all times and take a date and time; an empty To means until now. A custom period is kept in the address bar, so a reload or a shared link opens it again.
+- A custom period counts the slot it starts in.
+- **Show in graph** on an activation no longer changes the period; **← Back to …** under the graph returns to it.
+- The strip under the graph reaches back to where the graph starts when that is more than 7 days ago.
+- The price status lines are shown one per line.
+
 ## 1.6.2
 
 - aFRR commands are striped on the graph, mFRR commands solid, in the same red (DOWN) and green (UP). Wide bands say which, e.g. "UP · aFRR", and so does the tooltip.
