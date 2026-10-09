@@ -231,7 +231,7 @@ Rebuilds the slot rows for a past period from Home Assistant's recorded history.
 
 How to run it:
 
--   **UI:** the "Backfill from Home Assistant" panel. Pick from/to and click Backfill. It shows progress and reloads the table when done.
+-   **UI:** the "Backfill from Home Assistant" panel. Pick from/to and click Backfill. It shows progress and reloads the table when done. The backfill runs on the server, so you can close the page while it works; the progress shows again when you come back.
 
 -   **API:** `POST /api/backfill` with `{"from": "2026-09-28T00:00", "to": "2026-10-05T00:00"}` (local time). `GET /api/backfill` returns the status. Only one backfill runs at a time.
 
