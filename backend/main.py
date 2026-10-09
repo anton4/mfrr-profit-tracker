@@ -1,6 +1,8 @@
 # main.py
 import os
-from datetime import datetime, timedelta
+import threading
+from collections import deque
+from datetime import datetime, timedelta, timezone
 from apscheduler.schedulers.background import BackgroundScheduler
 import pytz
 from sqlite_utils import Database
@@ -9,6 +11,7 @@ from sqlite_utils.db import NotFoundError
 from ha import (GridMeter, classify_market, deviation_direction, get_entity, get_requested_w,
                 get_signal, get_source_changed)
 from baseline import SignalBaseline
+from history import HistoryStates, current_units, fetch_history
 import ha_sensors
 import ha_statistics
 import config
@@ -17,6 +20,8 @@ import sensors
 DB_PATH = config.DB_PATH
 tz = pytz.timezone("Europe/Tallinn")
 SLOT = timedelta(minutes=15)
+TICK = timedelta(seconds=10)
+LIVE_WINDOW = timedelta(hours=2)   # ticks kept for the live view
 
 # aFRR energy prices aren't published reliably yet: estimate (€/MWh) until Volton or a
 # Qilowatt report gives the real figure. Defaults are the rates implied by Kratt reports
@@ -130,8 +135,11 @@ class Tracker:
     commanded direction.
     """
 
-    def __init__(self, store_baseline: bool = True):
+    def __init__(self, store_baseline: bool = True, keep_points: bool = False):
         self.meter = GridMeter()
+        # Last LIVE_WINDOW of ticks for the live view (live tracker only)
+        self.points = deque(maxlen=int(LIVE_WINDOW / TICK) + 60) if keep_points else None
+        self._points_lock = threading.Lock()
         self.baseline = SignalBaseline(store=store_baseline)
         self.last_logged_signal = None
         self.run_market = None   # market of the current Kratt run
@@ -171,12 +179,15 @@ class Tracker:
         if not signal:
             self.run_market = self.run_start = None
             self.run_rows = {}
+            self._record(now, None)
             return
         if self.run_market is None:
             self.run_start = (get_source_changed(fetch) or now).astimezone(tz)
             self.run_market = classify_market(self.run_start)
             if live:
                 print(f"🏷️  Kratt run from {self.run_start.isoformat()} classified as {self.run_market}")
+        requested_w = get_requested_w(fetch)
+        self._record(now, signal, baseline_w, requested_w)
         if not write:
             return
         market = self.run_market
@@ -192,7 +203,6 @@ class Tracker:
         net_kwh, seconds = reading if reading else (0.0, 0.0)
         baseline_kwh = baseline_w * seconds / 3_600_000.0
         deviation_kwh = net_kwh - baseline_kwh
-        requested_w = get_requested_w(fetch)
 
         def new_row(direction: str) -> dict:
             row = {
@@ -277,6 +287,26 @@ class Tracker:
     # (HA reports the end a few seconds late)
     BOUNDARY_GRACE_S = 30
 
+    def _record(self, now: datetime, signal: str | None, baseline_w: float | None = None,
+                requested_w: float | None = None):
+        """One live-view point: net grid power and the Kratt command at this tick."""
+        if self.points is None:
+            return
+        power_w = self.meter.power_w
+        with self._points_lock:
+            self.points.append({
+                "t": now.isoformat(),
+                "grid_w": round(power_w) if power_w is not None else None,
+                "signal": signal,
+                "market": self.run_market if signal else None,
+                "baseline_w": baseline_w,
+                "requested_w": round(requested_w) if requested_w is not None else None,
+            })
+
+    def recent_points(self, since: datetime) -> list[dict]:
+        with self._points_lock:
+            return [p for p in self.points if datetime.fromisoformat(p["t"]) >= since]
+
     def _resolve_boundary(self, now: datetime, active: bool, db: Database):
         """After an mFRR run crossed a quarter: if it continued, the last minute was a ramp into the
         next activation (keep). If it ended at the quarter, Kratt counts that minute in its own
@@ -328,10 +358,67 @@ class Tracker:
         return None
 
 
-live_tracker = Tracker()
+live_tracker = Tracker(keep_points=True)
 
 def write_current_timeslot():
     live_tracker.tick(datetime.now(tz).replace(microsecond=0))
+
+
+def seed_live_points():
+    """After a start, fill the live view's last two hours by replaying Home Assistant history
+    through the same tick logic (nothing is written)."""
+    sensor = sensors.current()
+    entities = [e for e in (sensor["source"], sensor["mode"], sensor["powerlimit"], *sensor["grid_power"]) if e]
+    end = datetime.now(timezone.utc)
+    warm_start = end - LIVE_WINDOW - timedelta(minutes=5)   # primes the meter and the baseline
+    try:
+        changes = fetch_history(entities, warm_start, end)
+    except Exception as e:
+        print(f"⚠️ Live view starts empty: no Home Assistant history ({e})")
+        return
+    states = HistoryStates(changes, current_units(entities))
+    replay = Tracker(store_baseline=False, keep_points=True)
+    db = Database(DB_PATH)
+    t = warm_start
+    while t < end:
+        states.now = t
+        replay.tick(t.astimezone(tz), fetch=states.fetch, write=False, live=False, db=db)
+        t += TICK
+    since = (end - LIVE_WINDOW).astimezone(tz)
+    replayed = replay.recent_points(since)
+    # Started during a Kratt run: the live tracker had no idle readings before the signal and
+    # locked 0 W. Take the baseline the replay found before the same run started instead.
+    baseline_w = None
+    if (replay.run_start and live_tracker.run_start and replay.baseline.baseline_w is not None
+            and abs((replay.run_start - live_tracker.run_start).total_seconds()) < 60
+            and any(p["signal"] is None and datetime.fromisoformat(p["t"]) < replay.run_start for p in replayed)):
+        baseline_w = live_tracker.baseline.baseline_w = replay.baseline.baseline_w
+        print(f"[baseline] Started during a Kratt run: baseline {baseline_w} W from the history before it")
+    with live_tracker._points_lock:
+        recorded = list(live_tracker.points)
+        if baseline_w is not None:
+            for p in recorded:
+                if p["signal"]:
+                    p["baseline_w"] = baseline_w
+        live_tracker.points.clear()
+        live_tracker.points.extend(replayed + recorded)
+
+
+def live_status() -> dict:
+    """The Kratt command right now and the last two hours of ticks."""
+    points = live_tracker.recent_points(datetime.now(tz) - LIVE_WINDOW)
+    last = points[-1] if points else {}
+    return {
+        "signal": last.get("signal"),
+        "market": last.get("market"),
+        "since": live_tracker.run_start.isoformat() if last.get("signal") and live_tracker.run_start else None,
+        "grid_w": last.get("grid_w"),
+        "baseline_w": last.get("baseline_w"),
+        "requested_w": last.get("requested_w"),
+        "updated_at": last.get("t"),
+        "window_s": int(LIVE_WINDOW.total_seconds()),
+        "points": points,
+    }
 
 # Scheduler is started by FastAPI (api.py)
 scheduler = BackgroundScheduler()

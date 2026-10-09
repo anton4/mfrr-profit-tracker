@@ -1,6 +1,9 @@
 /* mFRR Profit Tracker — dashboard styles (light + dark via .app.dark) */
 
 .app {
+  /* chart series (validated pair: CVD ΔE ≥ 24 in both modes) */
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
   --bg: #f4f5f7;
   --surface: #ffffff;
   --surface-2: #f8f9fb;
@@ -30,6 +33,8 @@
 }
 
 .app.dark {
+  --series-1: #3987e5;
+  --series-2: #d95926;
   --bg: #0e1116;
   --surface: #161b22;
   --surface-2: #1c222b;
@@ -311,6 +316,56 @@ button { font: inherit; }
 
 @media (max-width: 720px) {
   .switch { padding: 0 10px; }
+}
+
+/* ---------- live view ---------- */
+.live { display: grid; grid-template-columns: minmax(200px, 250px) 1fr; gap: 20px; padding: 18px 20px; }
+.live-status { display: flex; flex-direction: column; gap: 8px; }
+.live-head { display: flex; align-items: center; gap: 8px; min-height: 28px; }
+.live-head .pill { font-size: 15px; font-weight: 600; padding: 3px 12px; }
+.live-idle { font-size: 18px; font-weight: 500; }
+.live-figures { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; margin: 4px 0 0; }
+.live-figures dt { font-size: 12px; color: var(--muted); }
+.live-figures dd { margin: 2px 0 0; font-size: 18px; font-weight: 500; }
+.live-plot { min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.live-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; color: var(--muted); }
+.live-legend > span { display: inline-flex; align-items: center; gap: 6px; }
+.key { display: inline-block; width: 16px; height: 0; border-top: 2px solid transparent; flex: none; }
+.key-grid { border-top-color: var(--series-1); }
+.key-target { border-top: 2px dashed var(--series-2); }
+.swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; flex: none; }
+.live-chart { position: relative; width: 100%; }
+.live-chart svg { display: block; touch-action: pan-y; }
+.live-chart svg:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+.live-band-DOWN { fill: var(--down-soft); background: var(--down-soft); }
+.live-band-UP { fill: var(--up-soft); background: var(--up-soft); }
+.live-band-label { font-size: 10px; font-weight: 600; fill: var(--muted); }
+.app.dark rect.live-band-DOWN, .app.dark rect.live-band-UP { opacity: 0.7; }
+.live-grid { stroke: var(--line); stroke-width: 1; }
+.live-zero { stroke: var(--muted); stroke-width: 1; opacity: 0.6; }
+.live-tick { font-size: 11px; fill: var(--muted); font-variant-numeric: tabular-nums; }
+.live-line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.live-line-grid { stroke: var(--series-1); }
+.live-line-target { stroke: var(--series-2); stroke-dasharray: 5 4; }
+.live-crosshair { stroke: var(--muted); stroke-width: 1; }
+.live-dot { stroke: var(--surface); stroke-width: 2; }
+.live-dot-grid { fill: var(--series-1); }
+.live-dot-target { fill: var(--series-2); }
+.live-tip {
+  position: absolute; top: 8px; width: max-content; max-width: 260px; padding: 8px 10px; border-radius: 10px; pointer-events: none;
+  background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 3px;
+}
+.live-tip-row { display: flex; align-items: center; gap: 6px; font-size: 12px; white-space: nowrap; }
+.live-tip-row strong { font-variant-numeric: tabular-nums; font-weight: 600; }
+.live-empty { padding: 40px 0; text-align: center; }
+.live-table summary { cursor: pointer; color: var(--muted); }
+.live-table table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
+.live-table th { text-align: left; color: var(--muted); font-weight: 500; padding: 4px 8px; border-bottom: 1px solid var(--line); }
+.live-table td { padding: 3px 8px; border-bottom: 1px solid var(--line); }
+.live-table tbody { display: block; max-height: 240px; overflow-y: auto; }
+.live-table thead, .live-table tbody tr { display: table; width: 100%; table-layout: fixed; }
+@media (max-width: 720px) {
+  .live { grid-template-columns: 1fr; padding: 16px; }
 }
 
 /* ---------- configuration ---------- */

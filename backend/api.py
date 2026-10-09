@@ -1,5 +1,6 @@
 # api.py
 import os
+import threading
 from contextlib import asynccontextmanager
 from typing import Optional
 from datetime import datetime
@@ -30,6 +31,8 @@ async def lifespan(app: FastAPI):
     print("💶 aFRR market price (CBMP): "
           + ("ENTSO-E token set" if entsoe_cbmp.configured() else "ENTSO-E token not set, not shown"))
     main.write_current_timeslot()
+    # The live view's last two hours, replayed from HA history without delaying the start
+    threading.Thread(target=main.seed_live_points, daemon=True).start()
     profit_calc.run_profit_calculation()
     mffr_price_updater.fetch_and_update_mffr_prices()
     for scheduler in (main.scheduler, profit_calc.scheduler, mffr_price_updater.scheduler):
@@ -205,6 +208,11 @@ def save_config(request: Request, payload: dict = Body(...)):
     print("⚙️ Configuration saved in the tracker's UI, restarting the add-on")
     addon_config.restart_soon()
     return {"restarting": True}
+
+@app.get("/api/live")
+def get_live():
+    """Current Kratt command (direction, market, requested power) and the last two hours of ticks."""
+    return main.live_status()
 
 @app.get("/api/version")
 def get_version():
