@@ -256,6 +256,8 @@ How to run it:
 
 -   backend/backfill.py / backend/history.py: Backfill from the HA history API.
 
+-   backend/graph.py: The power graph for any window, from HA history (up to 6 h, replayed through the tracker's logic) or HA's long-term statistics (`/api/graph`).
+
 -   backend/fees.py: Import/export prices with seller and network fees, day/night rate and Estonian holidays.
 
 -   backend/ha.py: Home Assistant access and Kratt signal detection.

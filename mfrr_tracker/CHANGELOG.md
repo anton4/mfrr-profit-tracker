@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.6.0
+
+- The graph shows any period, not only the last two hours: presets from 15 minutes to 7 days, ◀ ▶ to step back and forward, Live to follow now, Go to a date and time, and a 7-day strip to click or drag through. Drag to move, Shift-drag to zoom into a range, Ctrl/⌘ + scroll or pinch to zoom, double-click to zoom out.
+- **Show in graph** on each activation opens the graph around it.
+- The data comes from Home Assistant, nothing is stored twice: up to 6 hours from the recorded history with 10-second detail, the baseline and Kratt's target; longer periods from Home Assistant's long-term statistics (5-minute or hourly means).
+
 ## 1.5.1
 
 - The price status shows the three sources the same way: **mFRR prices** (Baltic Transparency Dashboard), **aFRR prices** (Volton) and **aFRR market price** (ENTSO-E). Each says whether it's up to date, waiting, failing or off, when it was checked, when it's checked next and how many slots wait for it. The separate Waiting and Error chips are gone.

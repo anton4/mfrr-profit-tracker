@@ -567,6 +567,14 @@ function App() {
   }, [data]);
 
   const [openRow, setOpenRow] = useState(null);
+  // An activation's "show in graph" button opens the graph around it
+  const [graphFocus, setGraphFocus] = useState(null);
+  const showInGraph = (entry) => setGraphFocus((f) => ({ start: entry.start, end: entry.end, n: (f?.n ?? 0) + 1 }));
+  const graphButton = (entry) => (
+    <button type="button" className="rowbtn" aria-label="Show in graph" title="Show in graph" onClick={() => showInGraph(entry)}>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 3v18h18" /><path d="m7 15 4-4 3 3 5-6" /></svg>
+    </button>
+  );
   const officialFor = (entry) => {
     const key = `${entry.timeslot}|${entry.signal}`;
     return officialRowId.get(key) === entry.id ? official.get(key) : undefined;
@@ -704,7 +712,7 @@ function App() {
           </div>
         )}
 
-        <LiveView apiBase={API_BASE} />
+        <LiveView apiBase={API_BASE} focus={graphFocus} />
 
         <div className="kpis">
           <div className="card kpi">
@@ -897,7 +905,8 @@ function App() {
                               )}
                             </span>
                           </div>
-                          <div className="r">
+                          <div className="r row-actions">
+                            {graphButton(entry)}
                             <button type="button" className="rowbtn" aria-expanded={open} aria-label="Show details" onClick={() => setOpenRow(open ? null : id)}>
                               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ transform: open ? 'rotate(180deg)' : undefined }}><path d="m6 9 6 6 6-6" /></svg>
                             </button>
@@ -963,6 +972,7 @@ function App() {
                       <div className="act-card-foot small muted">
                         <span>Price <span className="num text">{entry.mffr_price ?? '–'}</span>{entry.price_source === 'estimate' ? ' est.' : ''}</span>
                         <span>Kratt <span className="num text">{kratt(entry)}</span></span>
+                        {graphButton(entry)}
                         <button type="button" className="rowbtn" aria-expanded={open} aria-label="Show details" onClick={() => setOpenRow(open ? null : id)}>
                           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ transform: open ? 'rotate(180deg)' : undefined }}><path d="m6 9 6 6 6-6" /></svg>
                         </button>

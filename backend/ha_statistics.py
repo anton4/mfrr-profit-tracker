@@ -114,6 +114,28 @@ class _Connection:
         self.ws.close()
 
 
+def statistics_during_period(statistic_ids: list[str], start: datetime, end: datetime, period: str) -> dict:
+    """Home Assistant's long-term statistics (mean, in W) per id: {id: [(start, mean), …]}.
+    period: "5minute" (kept as long as the recorder history) or "hour" (kept indefinitely)."""
+    conn = _Connection()
+    try:
+        reply = conn.call({
+            "type": "recorder/statistics_during_period",
+            "start_time": start.astimezone(timezone.utc).isoformat(),
+            "end_time": end.astimezone(timezone.utc).isoformat(),
+            "statistic_ids": statistic_ids, "period": period, "types": ["mean"], "units": {"power": "W"},
+        })
+    finally:
+        conn.close()
+    if not reply.get("success"):
+        raise RuntimeError(f"statistics_during_period failed: {reply.get('error')}")
+    result = {}
+    for statistic_id, rows in (reply.get("result") or {}).items():
+        result[statistic_id] = [(datetime.fromtimestamp(r["start"] / 1000, timezone.utc) if isinstance(r["start"], (int, float))
+                                 else datetime.fromisoformat(r["start"]), r.get("mean")) for r in rows]
+    return result
+
+
 def _import(conn: _Connection, statistic_id: str, stats: list[dict]):
     global _extended_metadata
     for i in range(0, len(stats), CHUNK):

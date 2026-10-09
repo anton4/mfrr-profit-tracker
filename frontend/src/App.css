@@ -223,12 +223,13 @@ button { font: inherit; }
   grid-template-columns:
     minmax(116px, 1.3fr) minmax(86px, 0.8fr) minmax(86px, 0.9fr) minmax(48px, 0.5fr) minmax(70px, 0.75fr)
     minmax(88px, 0.85fr) minmax(92px, 1fr) minmax(88px, 0.9fr) minmax(84px, 0.9fr) minmax(70px, 0.85fr)
-    minmax(76px, 0.9fr) minmax(104px, 1.1fr) minmax(92px, 1fr) 36px;
+    minmax(76px, 0.9fr) minmax(104px, 1.1fr) minmax(92px, 1fr) 76px;
   align-items: center;
   column-gap: 8px;
   padding: 8px 20px;
 }
 .act-grid > div { display: flex; align-items: center; }
+.row-actions { justify-content: flex-end; gap: 4px; }
 .act-head {
   align-items: end;
   background: var(--surface-2); color: var(--muted);
@@ -336,7 +337,7 @@ button { font: inherit; }
 .key-target { border-top: 2px dashed var(--series-2); }
 .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; flex: none; }
 .live-chart { position: relative; width: 100%; }
-.live-chart svg { display: block; touch-action: pan-y; }
+.live-chart svg { display: block; touch-action: pan-y; user-select: none; }
 .live-chart svg:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
 .live-band-DOWN { fill: var(--down-soft); background: var(--down-soft); }
 .live-band-UP { fill: var(--up-soft); background: var(--up-soft); }
@@ -359,6 +360,29 @@ button { font: inherit; }
 .live-tip-row { display: flex; align-items: center; gap: 6px; font-size: 12px; white-space: nowrap; }
 .live-tip-row strong { font-variant-numeric: tabular-nums; font-weight: 600; }
 .live-empty { padding: 40px 0; text-align: center; }
+.live-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.live-nav { display: inline-flex; align-items: center; gap: 4px; flex-wrap: nowrap; }
+.iconbtn-sm { width: 32px; height: 32px; border-radius: 9px; }
+.iconbtn:disabled { opacity: 0.4; cursor: default; }
+.btn-chip {
+  display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--surface); color: var(--text); font: inherit; font-size: 13px; font-weight: 500;
+}
+.btn-chip.on { border-color: transparent; background: var(--up-soft); }
+.live-goto { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; }
+.live-goto input {
+  font: inherit; font-size: 13px; color: var(--text); background: var(--surface); height: 32px; box-sizing: border-box;
+  border: 1px solid var(--line); border-radius: 9px; padding: 0 8px;
+}
+.live-goto .btn-link { height: 32px; }
+.live-chart.is-loading svg { opacity: 0.55; transition: opacity 0.2s ease; }
+.live-chart svg { cursor: grab; }
+.live-chart svg:active { cursor: grabbing; }
+.live-selection { fill: var(--series-1); opacity: 0.12; stroke: var(--series-1); stroke-width: 1; }
+.live-caption { min-height: 18px; }
+.live-overview svg { display: block; cursor: pointer; touch-action: pan-y; }
+.live-overview-line { stroke: var(--muted); stroke-width: 1.5; opacity: 0.8; }
+.live-brush { fill: var(--series-1); fill-opacity: 0.12; stroke: var(--series-1); stroke-width: 1.5; rx: 3; }
 .live-table summary { cursor: pointer; color: var(--muted); }
 .live-table table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
 .live-table th { text-align: left; color: var(--muted); font-weight: 500; padding: 4px 8px; border-bottom: 1px solid var(--line); }
