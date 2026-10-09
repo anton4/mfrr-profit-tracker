@@ -43,6 +43,8 @@ DB_FILE = config.DB_PATH
 STATIC_DIR = "static"   # built frontend (copied in by the Dockerfile)
 
 LOCAL_TZ = pytz.timezone(os.getenv("TZ", "Europe/Tallinn"))
+VERSION = os.getenv("TRACKER_VERSION", "dev")
+STARTED_AT = datetime.now(LOCAL_TZ).isoformat()   # changes on every restart
 
 app.add_middleware(
     CORSMiddleware,
@@ -183,6 +185,11 @@ def reset_sensor_settings():
     sensors.reset()
     print(f"🔌 Sensors reset to the add-on options: {sensors.describe()}")
     return _sensor_settings()
+
+@app.get("/api/version")
+def get_version():
+    """Installed version; the UI compares it with its own to spot a page cached from an older one."""
+    return {"version": VERSION, "started_at": STARTED_AT}
 
 @app.get("/api/price-sync")
 def get_price_sync():

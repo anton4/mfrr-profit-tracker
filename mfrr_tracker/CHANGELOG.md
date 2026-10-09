@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.2
+
+- The page header shows the version of the page you're looking at. If the browser still shows a page cached from an older version, a **Version … is installed** notice appears; click it to load the current page.
+
 ## 1.3.1
 
 - The UI shows the new version right after an add-on update. Before, the browser could keep using the cached page from the previous version for a while.

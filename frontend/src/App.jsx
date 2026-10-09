@@ -4,6 +4,8 @@ import './App.css';
 
 // Relative, so the UI also works under a path prefix (Home Assistant Ingress); vite dev proxies /api
 const API_BASE = ".";
+// Set at build time from the add-on version (Dockerfile BUILD_VERSION)
+const UI_VERSION = import.meta.env.VITE_APP_VERSION || 'dev';
 
 // Column explanations shown by <Hint>
 const HINTS = {
@@ -113,6 +115,21 @@ function App() {
   const [customRange, setCustomRange] = useState({ from: '', to: '' });
   const [loading, setLoading] = useState(false);
   const [priceSync, setPriceSync] = useState(null);
+  // Installed version: differs from UI_VERSION when the browser kept a page cached from an older one
+  const [installedVersion, setInstalledVersion] = useState(null);
+  useEffect(() => {
+    fetch(`${API_BASE}/api/version`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((v) => { if (v) setInstalledVersion(v.version); })
+      .catch((e) => console.error('Version fetch failed', e));
+  }, []);
+  const staleUi = installedVersion && installedVersion !== UI_VERSION && installedVersion !== 'dev' && UI_VERSION !== 'dev';
+  // A new ?v= makes the browser fetch the page instead of using its cached copy
+  const reloadUi = () => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('v', installedVersion);
+    window.location.replace(url);
+  };
   const [reloadKey, setReloadKey] = useState(0);
 
   // Backfill from Home Assistant history
@@ -634,7 +651,7 @@ function App() {
             </div>
             <div>
               <h1>mFRR Profit Tracker</h1>
-              <div className="muted small">Kratt · Estonia · grid-side metering</div>
+              <div className="muted small">Kratt · Estonia · grid-side metering · v{UI_VERSION}</div>
             </div>
           </div>
           <div className="toolbar">
@@ -669,6 +686,16 @@ function App() {
           <div className="custom-range">
             <label className="field">From<input type="date" value={customRange.from} onChange={(e) => setCustomRange({ ...customRange, from: e.target.value })} /></label>
             <label className="field">To<input type="date" value={customRange.to} onChange={(e) => setCustomRange({ ...customRange, to: e.target.value })} /></label>
+          </div>
+        )}
+
+        {staleUi && (
+          <div className="chips">
+            <button type="button" className="chip chip-warn chip-btn" onClick={reloadUi}>
+              <span className="dot dot-warn" />
+              <strong>Version {installedVersion} is installed</strong>
+              <span>this page is v{UI_VERSION} · reload</span>
+            </button>
           </div>
         )}
 

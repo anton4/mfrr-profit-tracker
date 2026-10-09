@@ -4,6 +4,9 @@ WORKDIR /ui
 COPY frontend/package*.json ./
 RUN npm ci --no-audit --no-fund
 COPY frontend/ ./
+# Version shown in the page header (after npm ci, so a new version keeps the dependency layer cached)
+ARG BUILD_VERSION=dev
+ENV VITE_APP_VERSION=${BUILD_VERSION}
 RUN npm run build
 
 # --- Stage 2: backend + built UI in one image ---
