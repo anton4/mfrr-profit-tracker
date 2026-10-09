@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.4.1
+
+- **Data tools → Configuration** has two views again: a form with a field for every option, and the raw YAML. Switch between them at any time; both save the same add-on options.
+- The form shows all options, also the optional ones that aren't set yet, such as the ENTSO-E token, with their defaults as placeholders. Sensor fields search your Home Assistant sensors and show their current value; the grid power sensors are one row per phase with the summed grid power.
+- The network package is a choice of Võrk 1, 2, 4, 5 or Custom again, showing the package's network rates; the network rate fields appear for Custom.
+- Home Assistant's own Configuration tab now shows a name and description for each option.
+
 ## 1.4.0
 
 - All settings live in one place: the add-on options. **Data tools → Configuration** in the tracker edits them as YAML, with a search to insert sensor IDs, and **Save & restart** applies them. The separate Sensors and Electricity fees editors in the tracker are gone.

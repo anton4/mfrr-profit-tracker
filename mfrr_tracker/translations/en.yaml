@@ -1,0 +1,79 @@
+configuration:
+  sensor_source:
+    name: Qilowatt source sensor
+    description: Kratt is in control while its state is "Kratt" (e.g. sensor.qw_source).
+  sensor_mode:
+    name: Qilowatt mode sensor
+    description: Direction of the command, frrdown = DOWN and frrup = UP (e.g. sensor.qw_mode).
+  sensor_powerlimit:
+    name: Qilowatt power limit sensor
+    description: Optional. The power Kratt requested (W or kW), for requested energy and delivery %.
+  sensor_grid_power:
+    name: Grid power sensors
+    description: One power sensor per phase, W or kW, + import / − export (e.g. Shelly 3EM channel a/b/c power). They should update every few seconds.
+  sensor_nordpool:
+    name: Nord Pool price sensor
+    description: Spot price in €/kWh without VAT or tariffs.
+  kratt_share:
+    name: Kratt share
+    description: Share of the activation revenue kept by Kratt (0.2 = 20 %).
+  afrr_price_up_eur_mwh:
+    name: aFRR UP price estimate
+    description: €/MWh, used until Volton publishes the aFRR clearing price.
+  afrr_price_down_eur_mwh:
+    name: aFRR DOWN price estimate
+    description: €/MWh (negative = you are paid), used until Volton publishes the aFRR clearing price.
+  mfrr_price_area:
+    name: mFRR price area
+    description: Bidding zone for mFRR prices from the Baltic Transparency Dashboard.
+  mfrr_price_recheck_min:
+    name: mFRR price recheck
+    description: Optional. Minutes between price checks while a finished slot waits for its price (default 5).
+  entsoe_token:
+    name: ENTSO-E API token
+    description: Optional. Shows the aFRR market price (CBMP) for comparison. Free from the ENTSO-E Transparency Platform.
+  entsoe_cbmp_area:
+    name: ENTSO-E CBMP area
+    description: Optional. Control area code (default Estonia, 10Y1001A1001A39I).
+  fee_network_package:
+    name: Network package
+    description: Elektrilevi Võrk 1, 2, 4 or 5 bring their own network rates; custom uses the network fees below.
+  fee_margin:
+    name: Seller margin
+    description: Optional. Cents/kWh excl. VAT (default 0).
+  fee_taastuv:
+    name: Renewable energy fee
+    description: Optional. Cents/kWh excl. VAT (default 0.84).
+  fee_aktsiis:
+    name: Electricity excise
+    description: Optional. Cents/kWh excl. VAT (default 0.307).
+  fee_tasakaal:
+    name: Balancing capacity fee
+    description: Optional. Cents/kWh excl. VAT (default 0.373).
+  fee_varustus:
+    name: Security of supply fee
+    description: Optional. Cents/kWh excl. VAT (default 0.758).
+  fee_elektrilevi_day:
+    name: Network day rate
+    description: Optional, custom package only. Cents/kWh excl. VAT.
+  fee_elektrilevi_night:
+    name: Network night / weekend rate
+    description: Optional, custom package only. Cents/kWh excl. VAT.
+  fee_elektrilevi_day_peak:
+    name: Network day peak rate
+    description: Optional, custom package only. Working days 09–12 and 16–20, November–March.
+  fee_elektrilevi_holiday_peak:
+    name: Network weekend peak rate
+    description: Optional, custom package only. Weekends and holidays 16–20, November–March.
+  fee_vat:
+    name: VAT
+    description: Optional. Percent (default 24).
+  fee_export_margin:
+    name: Export margin
+    description: Optional. Cents/kWh deducted from exported energy (default 0).
+  fee_export_tasakaal:
+    name: Export balancing fee
+    description: Optional. Cents/kWh deducted from exported energy (default 0).
+  publish_sensors:
+    name: Publish sensors
+    description: Publish the summary sensors and Energy dashboard statistics to Home Assistant.

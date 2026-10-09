@@ -21,7 +21,8 @@ MAX_LOOKBACK = timedelta(days=7)
 SLOT = timedelta(minutes=15)
 # The dashboard is only queried when a finished slot is missing its price, and then at most
 # this often (prices are published with a delay of about 1–3 h)
-RECHECK = timedelta(minutes=float(os.getenv("MFRR_PRICE_RECHECK_MIN", "5")))
+DEFAULT_RECHECK_MIN = 5
+RECHECK = timedelta(minutes=float(os.getenv("MFRR_PRICE_RECHECK_MIN", DEFAULT_RECHECK_MIN)))
 
 # Last sync result, served by /api/price-sync
 sync_status = {

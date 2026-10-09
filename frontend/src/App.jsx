@@ -1,5 +1,6 @@
 // frontend/src/App.jsx
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import ConfigPanel from './ConfigPanel';
 import './App.css';
 
 // Relative, so the UI also works under a path prefix (Home Assistant Ingress); vite dev proxies /api
@@ -90,13 +91,8 @@ function App() {
   }, [toolsOpen]);
   // Configured sensors that Home Assistant doesn't have, and HA's sensors for the search
   const [sensorStatus, setSensorStatus] = useState(null);   // { values, problems, entities, ha_error }
-  // The add-on options, edited as YAML (Data tools → Configuration)
-  const [config, setConfig] = useState(null);   // { editable, yaml, message }
-  const [configDraft, setConfigDraft] = useState('');
+  // The add-on options, edited as a form or YAML (Data tools → Configuration)
   const [configOpen, setConfigOpen] = useState(false);
-  const [configResult, setConfigResult] = useState(null);
-  const [sensorQuery, setSensorQuery] = useState('');
-  const configRef = useRef(null);
   // Period: from ?range=… (shareable links), else today
   const [filter, setFilterState] = useState(() => {
     const range = new URLSearchParams(window.location.search).get('range');
@@ -171,62 +167,23 @@ function App() {
     .then((res) => (res.ok ? res.json() : null))
     .then((st) => { if (st) setSensorStatus(st); return st; })
     .catch((e) => console.error('Sensor status fetch failed', e)), []);
-  const loadConfig = useCallback(() => fetch(`${API_BASE}/api/config`)
-    .then((res) => res.json().then((body) => (res.ok ? body : { editable: false, yaml: null, message: body.detail || `Error ${res.status}` })))
-    .then((cfg) => { setConfig(cfg); setConfigDraft(cfg.yaml ?? ''); })
-    .catch((e) => setConfig({ editable: false, yaml: null, message: String(e) })), []);
   // On page load; a sensor problem opens the Configuration section in Data tools
   useEffect(() => {
     loadSensorStatus().then((st) => { if (st?.problems.length) setConfigOpen(true); });
   }, [loadSensorStatus]);
-  // Fresh from the Supervisor whenever the section is shown, unless there are unsaved edits
-  const refreshConfig = () => {
-    loadSensorStatus();
-    if (!config || configDraft === (config.yaml ?? '')) loadConfig();
-  };
+  // Fresh sensor states for the Configuration section whenever it's shown
   const openTools = (withConfig = false) => {
     setToolsOpen(true);
     if (withConfig) setConfigOpen(true);
-    if (withConfig || configOpen) refreshConfig();
+    if (withConfig || configOpen) loadSensorStatus();
   };
   const toggleConfig = () => {
-    if (!configOpen) refreshConfig();
+    if (!configOpen) loadSensorStatus();
     setConfigOpen(!configOpen);
   };
   const sensorProblemText = (p) => (p.error === 'not set'
     ? `${p.option} not set`
     : `${p.option}: ${p.entity_id} not found in Home Assistant`);
-  // Put a sensor ID where the cursor is in the YAML
-  const insertSensor = () => {
-    const id = sensorQuery.trim();
-    const ta = configRef.current;
-    if (!id || !ta) return;
-    const start = ta.selectionStart ?? configDraft.length;
-    const end = ta.selectionEnd ?? start;
-    setConfigDraft(configDraft.slice(0, start) + id + configDraft.slice(end));
-    setSensorQuery('');
-    requestAnimationFrame(() => { ta.focus(); ta.setSelectionRange(start + id.length, start + id.length); });
-  };
-  // Save, then wait for the restarted add-on (a new started_at) and load its page
-  const saveConfig = async () => {
-    setConfigResult(null);
-    try {
-      const res = await fetch(`${API_BASE}/api/config`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ yaml: configDraft }) });
-      const body = await res.json();
-      if (!res.ok) { setConfigResult({ ok: false, text: body.detail || `Save failed (${res.status})` }); return; }
-    } catch (e) {
-      setConfigResult({ ok: false, text: String(e) });
-      return;
-    }
-    setConfigResult({ ok: true, text: 'Saved. Restarting the add-on…' });
-    const before = installed?.started_at;
-    for (let i = 0; i < 90; i += 1) {
-      await new Promise((r) => setTimeout(r, 2000));
-      const v = await fetch(`${API_BASE}/api/version`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
-      if (v && v.started_at !== before) { reloadUi(v.version); return; }
-    }
-    setConfigResult({ ok: false, text: 'The add-on didn\'t come back within 3 minutes. Check its log in Home Assistant.' });
-  };
 
   // Backfill status on page load (e.g. a backfill started earlier is still running)
   useEffect(() => {
@@ -1028,45 +985,12 @@ function App() {
             </span>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ transform: configOpen ? 'rotate(180deg)' : undefined }}><path d="m6 9 6 6 6-6" /></svg>
           </button>
-          {configOpen && !config && <div className="muted small">Loading…</div>}
-          {configOpen && config && (
+          {configOpen && (
             <>
               {sensorStatus?.problems.map((p) => (
                 <div key={`${p.option}-${p.entity_id}`} className="small err">{sensorProblemText(p)}</div>
               ))}
-              {config.editable ? (
-                <>
-                  <textarea ref={configRef} className="config-yaml" value={configDraft} rows={Math.min(28, configDraft.split('\n').length + 2)}
-                    spellCheck={false} aria-label="Add-on configuration (YAML)" onChange={(e) => setConfigDraft(e.target.value)} />
-                  <div className="tool-form">
-                    <label className="field">
-                      Insert a sensor at the cursor
-                      <input type="text" list="ha-sensors" value={sensorQuery} placeholder="Search Home Assistant sensors…"
-                        spellCheck={false} autoComplete="off" onChange={(e) => setSensorQuery(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); insertSensor(); } }} />
-                    </label>
-                    <button type="button" className="btn-link" onClick={insertSensor} disabled={!sensorQuery.trim()}>Insert</button>
-                  </div>
-                  <datalist id="ha-sensors">
-                    {(sensorStatus?.entities ?? []).map((e) => (
-                      <option key={e.entity_id} value={e.entity_id} label={`${e.name ?? e.entity_id} · ${e.state}${e.unit ? ` ${e.unit}` : ''}`} />
-                    ))}
-                  </datalist>
-                  <div className="tool-form">
-                    <button type="button" className="btn" onClick={saveConfig} disabled={configResult?.ok}>Save &amp; restart</button>
-                    {configDraft !== (config.yaml ?? '') && !configResult?.ok && (
-                      <button type="button" className="btn-link" onClick={() => setConfigDraft(config.yaml ?? '')}>Undo changes</button>
-                    )}
-                  </div>
-                  {configResult && <div className={`small ${configResult.ok ? 'ok' : 'err config-msg'}`}>{configResult.text}</div>}
-                  <div className="muted small">
-                    The same options as the add-on&apos;s Configuration tab in Home Assistant; the Documentation tab explains them.
-                    Saving restarts the add-on (a few seconds), and the page reloads when it&apos;s back.
-                  </div>
-                </>
-              ) : (
-                <div className="muted small">{config.message}</div>
-              )}
+              <ConfigPanel apiBase={API_BASE} sensorStatus={sensorStatus} startedAt={installed?.started_at} onRestarted={reloadUi} />
             </>
           )}
         </div>

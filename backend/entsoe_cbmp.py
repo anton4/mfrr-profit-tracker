@@ -21,7 +21,8 @@ tz = pytz.timezone("Europe/Tallinn")
 
 ENTSOE_API = "https://web-api.tp.entsoe.eu/api"
 ENTSOE_TOKEN = os.getenv("ENTSOE_TOKEN", "")
-AREA = os.getenv("ENTSOE_CBMP_AREA", "10Y1001A1001A39I")    # Estonia (Elering)
+DEFAULT_AREA = "10Y1001A1001A39I"    # Estonia (Elering)
+AREA = os.getenv("ENTSOE_CBMP_AREA", DEFAULT_AREA)
 SOURCE = "ENTSO-E (PICASSO)"
 TODAY_REFRESH = timedelta(hours=1)
 DIRECTIONS = {"A01": "UP", "A02": "DOWN"}
