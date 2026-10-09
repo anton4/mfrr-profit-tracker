@@ -130,6 +130,7 @@ button { font: inherit; }
 .dot-pos { background: var(--pos); }
 .dot-warn { background: var(--warn); }
 .dot-neg { background: var(--neg); }
+.dot-off { background: var(--muted); opacity: 0.6; }
 
 /* ---------- cards ---------- */
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }

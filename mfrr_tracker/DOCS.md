@@ -14,6 +14,20 @@ The top of the page shows the current Kratt command: UP or DOWN, mFRR or aFRR, s
 
 Hover over the chart, or focus it and use the arrow keys, to read the values at a moment. **Table view** lists them per minute.
 
+### Price status
+
+The chips above it show the price sources, all in the same way: when each was last checked, when it's checked next and how many slots wait for it.
+
+| Chip | Source | Waits for |
+|---|---|---|
+| **mFRR prices** | Baltic Transparency Dashboard | finished mFRR slots without a price; checked every 5 minutes until published |
+| **aFRR prices** | Volton clearing price | aFRR slots still on the estimate; checked hourly, for up to 3 days |
+| **aFRR market price** | ENTSO-E CBMP, for comparison only | aFRR slots without the market price; checked every 30 minutes |
+
+The dot and the word after the name give the state: green **up to date** (nothing waits), amber **waiting**, red **error** (the last check failed; the message follows), gray **off** (not set up, e.g. without an ENTSO-E token). Sources are only queried while something waits for them, so "next: not needed" is normal.
+
+The **Backfill** in Data tools runs in the add-on, so you can close the page while it works.
+
 ## Configuration
 
 All settings are add-on options; there is no second place. Edit them in either of two ways:
