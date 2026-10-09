@@ -313,13 +313,16 @@ button { font: inherit; }
   .switch { padding: 0 10px; }
 }
 
-/* ---------- sensors ---------- */
+/* ---------- configuration ---------- */
 .chip-btn { font: inherit; cursor: pointer; text-align: left; }
-.sensor-phase { display: flex; flex-direction: column; gap: 6px; }
-.sensor-row { display: flex; align-items: center; gap: 8px; }
-.sensor-row input { flex: 1; min-width: 0; }
-.sensor-row .iconbtn:disabled { opacity: 0.4; cursor: default; }
-.sensor-add { align-self: flex-start; height: 32px; padding: 0; }
+.config-yaml {
+  width: 100%; box-sizing: border-box; resize: vertical; padding: 10px 12px;
+  font-family: 'Geist Mono', ui-monospace, monospace; font-size: 12.5px; line-height: 1.5; color: var(--text);
+  background: var(--surface); border: 1px solid var(--line); border-radius: 10px; white-space: pre; overflow-x: auto;
+}
+.btn-link:disabled { opacity: 0.5; cursor: default; text-decoration: none; }
+/* YAML errors point at the column with a caret: keep line breaks and alignment */
+.config-msg { white-space: pre-wrap; font-family: 'Geist Mono', ui-monospace, monospace; font-size: 12px; }
 
 .seg-sm { align-self: flex-start; }
 .seg-sm button { padding: 6px 10px; min-height: 32px; font-size: 13px; }

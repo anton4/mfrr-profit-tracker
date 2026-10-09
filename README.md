@@ -72,7 +72,7 @@ KRATT_SHARE=0.20
 
 -   SENSOR_NORDPOOL: Nordpool integration sensor (no VAT/tariffs), price in €/kWh.
 
--   The sensors can also be picked in the UI under **Data tools → Sensors**, which lists your Home Assistant sensors with their current values. Sensors saved there override the `SENSOR_*` variables; **Use the add-on options** goes back to them. On start, the tracker logs any configured sensor that Home Assistant doesn't have.
+-   All settings come from `.env` (the add-on's options when it runs as a Home Assistant add-on). Restart the container after changing them. On start, the tracker logs any configured sensor that Home Assistant doesn't have.
 
 -   KRATT_SHARE: Share of activation revenue kept by Kratt (default 0.20 = 20%).
 
@@ -155,7 +155,7 @@ export      = spot − export_margin − export_tasakaal          (no VAT)
 
 The night/weekend network rate applies before 07:00, from 22:00, on Saturdays and Sundays, and on Estonian public holidays. The holidays include Good Friday, Easter Sunday and Pentecost, which are calculated each year. The rate is chosen by the local time of each 15-minute slot.
 
-Edit the fees under **Data tools → Electricity fees**. Values are in cents/kWh excl. VAT and are saved in the database. Changes apply immediately to all figures, including history. The defaults (Oct 2026):
+Set the fees with the `FEE_*` variables below (the `fee_*` options in the add-on). Values are in cents/kWh excl. VAT and apply to all figures, including history. The defaults (Oct 2026):
 
 | Fee | Default |
 |---|---|
@@ -168,7 +168,7 @@ Edit the fees under **Data tools → Electricity fees**. Values are in cents/kWh
 | VAT | 24 % |
 | Export margin, export balancing fee | 0 (contract-specific) |
 
-**Network package.** Pick Elektrilevi **Võrk 1, 2, 4 or 5**: their network prices are filled in from Elektrilevi's price list (valid from 1 June 2026, excl. VAT) and locked. Or pick **Custom** for another network operator or your own prices.
+**Network package.** With Elektrilevi **Võrk 1, 2, 4 or 5**, the network prices come from Elektrilevi's price list (valid from 1 June 2026, excl. VAT). Use **custom** for another network operator or your own prices.
 
 | Package | Day | Night / weekend | Day peak | Weekend peak |
 |---|---|---|---|---|
@@ -177,9 +177,9 @@ Edit the fees under **Data tools → Electricity fees**. Values are in cents/kWh
 | Võrk 4 | 3.69 | 2.10 | – | – |
 | Võrk 5 | 5.29 | 3.03 | 8.18 | 4.74 |
 
-Peak rates apply November–March: the day peak on working days 09–12 and 16–20, the weekend peak on weekends and holidays 16–20. A Custom package uses peak hours only if you enter peak prices. Monthly network fees are fixed costs and aren't included. `FEE_NETWORK_PACKAGE` (`vork1`, `vork2`, `vork4`, `vork5` or `custom`) sets the default package.
+Peak rates apply November–March: the day peak on working days 09–12 and 16–20, the weekend peak on weekends and holidays 16–20. A custom package uses peak hours only if you set peak prices. Monthly network fees are fixed costs and aren't included. `FEE_NETWORK_PACKAGE` (`vork1`, `vork2`, `vork4`, `vork5` or `custom`) sets the package.
 
-Defaults can be overridden with `FEE_MARGIN`, `FEE_TAASTUV`, `FEE_AKTSIIS`, `FEE_TASAKAAL`, `FEE_VARUSTUS`, `FEE_ELEKTRILEVI_DAY`, `FEE_ELEKTRILEVI_NIGHT`, `FEE_VAT`, `FEE_EXPORT_MARGIN` and `FEE_EXPORT_TASAKAAL`. One set of values applies to all history; rate changes over time aren't modelled. 
+The defaults can be changed with `FEE_MARGIN`, `FEE_TAASTUV`, `FEE_AKTSIIS`, `FEE_TASAKAAL`, `FEE_VARUSTUS`, `FEE_VAT`, `FEE_EXPORT_MARGIN` and `FEE_EXPORT_TASAKAAL`, and for a custom package `FEE_ELEKTRILEVI_DAY`, `FEE_ELEKTRILEVI_NIGHT`, `FEE_ELEKTRILEVI_DAY_PEAK` and `FEE_ELEKTRILEVI_HOLIDAY_PEAK`. One set of values applies to all history; rate changes over time aren't modelled. 
 
 The `?fees=on|off` and `?range=this_month` URL parameters open the dashboard with that setting.
 

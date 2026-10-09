@@ -69,7 +69,7 @@ def run_backfill(start: datetime, end: datetime, progress=lambda phase, pct: Non
     sensor = sensors.current()
     grid_power = sensor["grid_power"]
     if not sensor["source"] or not sensor["mode"] or not grid_power:
-        raise ValueError("Pick the Qilowatt and grid power sensors under Data tools → Sensors first")
+        raise ValueError("Set the Qilowatt and grid power sensors in the add-on configuration first")
     entities = [sensor["source"], sensor["mode"], *grid_power]
     if sensor["powerlimit"]:
         entities.append(sensor["powerlimit"])

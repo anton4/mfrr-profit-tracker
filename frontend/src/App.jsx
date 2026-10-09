@@ -1,5 +1,5 @@
 // frontend/src/App.jsx
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import './App.css';
 
 // Relative, so the UI also works under a path prefix (Home Assistant Ingress); vite dev proxies /api
@@ -43,10 +43,6 @@ const HINTS = {
 };
 
 // Label with an ⓘ button: explanation on hover, keyboard focus or tap
-// Editable copy of the sensor settings; grid power always shows at least one input
-const sensorDraftOf = (values) => ({ ...values, grid_power: values.grid_power.length ? [...values.grid_power] : [''] });
-const POWER_UNITS = { w: 1, kw: 1000, mw: 1000000 };
-
 function Hint({ label, hint, align = 'left' }) {
   return (
     <span className="hint">
@@ -84,23 +80,23 @@ function App() {
     setFeesOnState(on);
     try { localStorage.setItem('fees', on ? 'on' : 'off'); } catch { /* storage unavailable */ }
   };
-  const [feeConfig, setFeeConfig] = useState(null);   // { values, defaults, labels, unit }
-  const [feeDraft, setFeeDraft] = useState({});
-  const [feesOpen, setFeesOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
   useEffect(() => {
     if (!toolsOpen) return undefined;
-    // Escape in a sensor field only dismisses its suggestions
+    // Escape in the sensor search only dismisses its suggestions
     const onKey = (e) => { if (e.key === 'Escape' && !e.target.list) setToolsOpen(false); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [toolsOpen]);
-  const [feeStatus, setFeeStatus] = useState(null);
-  // Home Assistant sensors the tracker reads: picked in Data tools → Sensors, else the add-on options
-  const [sensorConfig, setSensorConfig] = useState(null);   // { values, defaults, saved, problems, entities, … }
-  const [sensorDraft, setSensorDraft] = useState(null);
-  const [sensorsOpen, setSensorsOpen] = useState(false);
-  const [sensorStatus, setSensorStatus] = useState(null);
+  // Configured sensors that Home Assistant doesn't have, and HA's sensors for the search
+  const [sensorStatus, setSensorStatus] = useState(null);   // { values, problems, entities, ha_error }
+  // The add-on options, edited as YAML (Data tools → Configuration)
+  const [config, setConfig] = useState(null);   // { editable, yaml, message }
+  const [configDraft, setConfigDraft] = useState('');
+  const [configOpen, setConfigOpen] = useState(false);
+  const [configResult, setConfigResult] = useState(null);
+  const [sensorQuery, setSensorQuery] = useState('');
+  const configRef = useRef(null);
   // Period: from ?range=… (shareable links), else today
   const [filter, setFilterState] = useState(() => {
     const range = new URLSearchParams(window.location.search).get('range');
@@ -116,18 +112,19 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [priceSync, setPriceSync] = useState(null);
   // Installed version: differs from UI_VERSION when the browser kept a page cached from an older one
-  const [installedVersion, setInstalledVersion] = useState(null);
+  const [installed, setInstalled] = useState(null);   // { version, started_at }
   useEffect(() => {
     fetch(`${API_BASE}/api/version`)
       .then((res) => (res.ok ? res.json() : null))
-      .then((v) => { if (v) setInstalledVersion(v.version); })
+      .then((v) => { if (v) setInstalled(v); })
       .catch((e) => console.error('Version fetch failed', e));
   }, []);
+  const installedVersion = installed?.version;
   const staleUi = installedVersion && installedVersion !== UI_VERSION && installedVersion !== 'dev' && UI_VERSION !== 'dev';
   // A new ?v= makes the browser fetch the page instead of using its cached copy
-  const reloadUi = () => {
+  const reloadUi = (version = installedVersion) => {
     const url = new URL(window.location.href);
-    url.searchParams.set('v', installedVersion);
+    url.searchParams.set('v', version);
     window.location.replace(url);
   };
   const [reloadKey, setReloadKey] = useState(0);
@@ -170,88 +167,66 @@ function App() {
   const [backfillError, setBackfillError] = useState(null);
   const backfillRunning = backfill?.state === 'running';
 
-  // Fee settings for the "with fees" figures
-  useEffect(() => {
-    fetch(`${API_BASE}/api/fees`)
-      .then((res) => (res.ok ? res.json() : null))
-      .then((cfg) => {
-        if (!cfg) return;
-        setFeeConfig(cfg);
-        setFeeDraft(Object.fromEntries(Object.entries(cfg.values).map(([k, v]) => [k, String(v)])));
-      })
-      .catch((e) => console.error('Fee settings fetch failed', e));
-  }, []);
-  const pickPackage = (id) => {
-    const rates = feeConfig?.packages?.[id]?.rates;
-    setFeeDraft((d) => ({
-      ...d,
-      network_package: id,
-      ...(rates ? Object.fromEntries(Object.entries(rates).map(([k, v]) => [k, String(v)])) : {}),
-    }));
-  };
-  const saveFees = async (values) => {
-    setFeeStatus(null);
-    const payload = {};
-    for (const [k, v] of Object.entries(values)) {
-      if (k === 'network_package') { payload[k] = v; continue; }
-      const n = Number(String(v).replace(',', '.'));
-      if (String(v).trim() === '' || Number.isNaN(n)) { setFeeStatus({ ok: false, text: `${feeConfig?.labels?.[k] ?? k}: not a number` }); return; }
-      payload[k] = n;
-    }
-    try {
-      const res = await fetch(`${API_BASE}/api/fees`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-      const body = await res.json();
-      if (!res.ok) { setFeeStatus({ ok: false, text: body.detail || `Save failed (${res.status})` }); return; }
-      setFeeConfig((c) => ({ ...c, values: body.values }));
-      setFeeDraft(Object.fromEntries(Object.entries(body.values).map(([k, v]) => [k, String(v)])));
-      setFeeStatus({ ok: true, text: 'Saved — figures with fees updated' });
-      setReloadKey((k) => k + 1);
-    } catch (e) {
-      setFeeStatus({ ok: false, text: String(e) });
-    }
-  };
-
-  const loadSensors = useCallback(() => fetch(`${API_BASE}/api/sensors`)
+  const loadSensorStatus = useCallback(() => fetch(`${API_BASE}/api/sensors`)
     .then((res) => (res.ok ? res.json() : null))
-    .then((cfg) => {
-      if (cfg) {
-        setSensorConfig(cfg);
-        setSensorDraft(sensorDraftOf(cfg.values));
-      }
-      return cfg;
-    })
-    .catch((e) => console.error('Sensor settings fetch failed', e)), []);
-  // On page load; a sensor problem opens the Sensors section in Data tools
+    .then((st) => { if (st) setSensorStatus(st); return st; })
+    .catch((e) => console.error('Sensor status fetch failed', e)), []);
+  const loadConfig = useCallback(() => fetch(`${API_BASE}/api/config`)
+    .then((res) => res.json().then((body) => (res.ok ? body : { editable: false, yaml: null, message: body.detail || `Error ${res.status}` })))
+    .then((cfg) => { setConfig(cfg); setConfigDraft(cfg.yaml ?? ''); })
+    .catch((e) => setConfig({ editable: false, yaml: null, message: String(e) })), []);
+  // On page load; a sensor problem opens the Configuration section in Data tools
   useEffect(() => {
-    loadSensors().then((cfg) => { if (cfg?.problems.length) setSensorsOpen(true); });
-  }, [loadSensors]);
-  const toggleSensors = () => {
-    if (!sensorsOpen) loadSensors();   // fresh entity states
-    setSensorsOpen(!sensorsOpen);
+    loadSensorStatus().then((st) => { if (st?.problems.length) setConfigOpen(true); });
+  }, [loadSensorStatus]);
+  // Fresh from the Supervisor whenever the section is shown, unless there are unsaved edits
+  const refreshConfig = () => {
+    loadSensorStatus();
+    if (!config || configDraft === (config.yaml ?? '')) loadConfig();
   };
-  const sendSensors = async (method) => {
-    setSensorStatus(null);
-    try {
-      const res = await fetch(`${API_BASE}/api/sensors`, method === 'PUT'
-        ? { method, headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...sensorDraft, grid_power: sensorDraft.grid_power.map((id) => id.trim()).filter(Boolean) }) }
-        : { method });
-      const body = await res.json();
-      if (!res.ok) { setSensorStatus({ ok: false, text: body.detail || `Save failed (${res.status})` }); return; }
-      setSensorConfig(body);
-      setSensorDraft(sensorDraftOf(body.values));
-      setSensorStatus({ ok: true, text: method === 'PUT' ? 'Saved, used from the next reading' : 'Using the add-on options again' });
-    } catch (e) {
-      setSensorStatus({ ok: false, text: String(e) });
-    }
+  const openTools = (withConfig = false) => {
+    setToolsOpen(true);
+    if (withConfig) setConfigOpen(true);
+    if (withConfig || configOpen) refreshConfig();
   };
-  const entityById = useMemo(
-    () => Object.fromEntries((sensorConfig?.entities ?? []).map((e) => [e.entity_id, e])),
-    [sensorConfig],
-  );
+  const toggleConfig = () => {
+    if (!configOpen) refreshConfig();
+    setConfigOpen(!configOpen);
+  };
   const sensorProblemText = (p) => (p.error === 'not set'
-    ? `${sensorConfig.labels[p.field]} not set`
-    : `${p.entity_id} not found in Home Assistant`);
+    ? `${p.option} not set`
+    : `${p.option}: ${p.entity_id} not found in Home Assistant`);
+  // Put a sensor ID where the cursor is in the YAML
+  const insertSensor = () => {
+    const id = sensorQuery.trim();
+    const ta = configRef.current;
+    if (!id || !ta) return;
+    const start = ta.selectionStart ?? configDraft.length;
+    const end = ta.selectionEnd ?? start;
+    setConfigDraft(configDraft.slice(0, start) + id + configDraft.slice(end));
+    setSensorQuery('');
+    requestAnimationFrame(() => { ta.focus(); ta.setSelectionRange(start + id.length, start + id.length); });
+  };
+  // Save, then wait for the restarted add-on (a new started_at) and load its page
+  const saveConfig = async () => {
+    setConfigResult(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/config`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ yaml: configDraft }) });
+      const body = await res.json();
+      if (!res.ok) { setConfigResult({ ok: false, text: body.detail || `Save failed (${res.status})` }); return; }
+    } catch (e) {
+      setConfigResult({ ok: false, text: String(e) });
+      return;
+    }
+    setConfigResult({ ok: true, text: 'Saved. Restarting the add-on…' });
+    const before = installed?.started_at;
+    for (let i = 0; i < 90; i += 1) {
+      await new Promise((r) => setTimeout(r, 2000));
+      const v = await fetch(`${API_BASE}/api/version`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+      if (v && v.started_at !== before) { reloadUi(v.version); return; }
+    }
+    setConfigResult({ ok: false, text: 'The add-on didn\'t come back within 3 minutes. Check its log in Home Assistant.' });
+  };
 
   // Backfill status on page load (e.g. a backfill started earlier is still running)
   useEffect(() => {
@@ -662,7 +637,7 @@ function App() {
                 </button>
               ))}
             </div>
-            <button type="button" className={`toolsbtn ${backfillRunning ? 'busy' : ''}`} aria-haspopup="dialog" onClick={() => setToolsOpen(true)}>
+            <button type="button" className={`toolsbtn ${backfillRunning ? 'busy' : ''}`} aria-haspopup="dialog" onClick={() => openTools()}>
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0" /><circle cx="16" cy="6" r="2" /><circle cx="10" cy="12" r="2" /><circle cx="18" cy="18" r="2" /></svg>
               <span>Data tools</span>
               {backfillRunning && <span className="num small">{backfill.progress}%</span>}
@@ -699,16 +674,16 @@ function App() {
           </div>
         )}
 
-        {(sensorConfig?.problems.length > 0 || sensorConfig?.ha_error) && (
+        {(sensorStatus?.problems.length > 0 || sensorStatus?.ha_error) && (
           <div className="chips">
-            <button type="button" className="chip chip-error chip-btn" onClick={() => { setToolsOpen(true); setSensorsOpen(true); }}>
+            <button type="button" className="chip chip-error chip-btn" onClick={() => openTools(true)}>
               <span className="dot dot-neg" />
               <strong>Sensors</strong>
               <span>
-                {sensorConfig.ha_error
-                  ? sensorConfig.ha_error
-                  : `${sensorProblemText(sensorConfig.problems[0])}${sensorConfig.problems.length > 1 ? ` + ${sensorConfig.problems.length - 1} more` : ''}`}
-                {' · '}pick them in Data tools
+                {sensorStatus.ha_error
+                  ? sensorStatus.ha_error
+                  : `${sensorProblemText(sensorStatus.problems[0])}${sensorStatus.problems.length > 1 ? ` + ${sensorStatus.problems.length - 1} more` : ''}`}
+                {' · '}fix in Data tools → Configuration
               </span>
             </button>
           </div>
@@ -1044,96 +1019,56 @@ function App() {
             </div>
             <div className="drawer-body">
         <div className="tool">
-          <button type="button" className="disclosure" aria-expanded={sensorsOpen} onClick={toggleSensors}>
-            <span className="tool-title">Sensors</span>
+          <button type="button" className="disclosure" aria-expanded={configOpen} onClick={toggleConfig}>
+            <span className="tool-title">Configuration</span>
             <span className="muted small">
-              {sensorConfig?.problems.length > 0
-                ? <span className="err">{sensorConfig.problems.length} problem{sensorConfig.problems.length > 1 ? 's' : ''}</span>
-                : sensorConfig ? (sensorConfig.saved ? 'picked here' : 'from the add-on options') : ''}
+              {sensorStatus?.problems.length > 0
+                ? <span className="err">{sensorStatus.problems.length} sensor problem{sensorStatus.problems.length > 1 ? 's' : ''}</span>
+                : 'add-on options'}
             </span>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ transform: sensorsOpen ? 'rotate(180deg)' : undefined }}><path d="m6 9 6 6 6-6" /></svg>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ transform: configOpen ? 'rotate(180deg)' : undefined }}><path d="m6 9 6 6 6-6" /></svg>
           </button>
-          {sensorsOpen && sensorConfig && sensorDraft && (() => {
-            const entities = sensorConfig.entities;
-            const lists = {
-              power: entities.filter((e) => e.power),
-              price: entities.some((e) => e.price) ? entities.filter((e) => e.price) : entities,
-              text: entities,
-            };
-            // Current state under each input, or why the entity can't be used
-            const note = (id) => {
-              const e = entityById[id.trim()];
-              if (!id.trim() || sensorConfig.ha_error) return null;
-              if (!e) return <span className="small err">Not found in Home Assistant</span>;
-              return <span className="small">{e.name ? `${e.name} · ` : ''}{e.state}{e.unit ? ` ${e.unit}` : ''}</span>;
-            };
-            const input = (key, value, onChange, label) => (
-              <input type="text" list={`ha-sensors-${sensorConfig.kinds[key]}`} value={value} placeholder="sensor.…"
-                aria-label={label} spellCheck={false} autoComplete="off" onChange={(ev) => onChange(ev.target.value)} />
-            );
-            const setField = (key) => (value) => setSensorDraft({ ...sensorDraft, [key]: value });
-            const phases = sensorDraft.grid_power;
-            const setPhases = (next) => setSensorDraft({ ...sensorDraft, grid_power: next });
-            // Net grid power right now, as the tracker sums it (W, + import / − export)
-            const watts = phases.map((id) => {
-              const e = entityById[id.trim()];
-              const v = Number(e?.state);
-              return e && e.state !== '' && Number.isFinite(v) ? v * (POWER_UNITS[(e.unit || 'W').toLowerCase()] ?? 1) : null;
-            });
-            const netW = watts.length && watts.every((w) => w !== null) ? watts.reduce((a, b) => a + b, 0) : null;
-            return (
-              <>
-                {Object.entries(lists).map(([kind, list]) => (
-                  <datalist key={kind} id={`ha-sensors-${kind}`}>
-                    {list.map((e) => (
+          {configOpen && !config && <div className="muted small">Loading…</div>}
+          {configOpen && config && (
+            <>
+              {sensorStatus?.problems.map((p) => (
+                <div key={`${p.option}-${p.entity_id}`} className="small err">{sensorProblemText(p)}</div>
+              ))}
+              {config.editable ? (
+                <>
+                  <textarea ref={configRef} className="config-yaml" value={configDraft} rows={Math.min(28, configDraft.split('\n').length + 2)}
+                    spellCheck={false} aria-label="Add-on configuration (YAML)" onChange={(e) => setConfigDraft(e.target.value)} />
+                  <div className="tool-form">
+                    <label className="field">
+                      Insert a sensor at the cursor
+                      <input type="text" list="ha-sensors" value={sensorQuery} placeholder="Search Home Assistant sensors…"
+                        spellCheck={false} autoComplete="off" onChange={(e) => setSensorQuery(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); insertSensor(); } }} />
+                    </label>
+                    <button type="button" className="btn-link" onClick={insertSensor} disabled={!sensorQuery.trim()}>Insert</button>
+                  </div>
+                  <datalist id="ha-sensors">
+                    {(sensorStatus?.entities ?? []).map((e) => (
                       <option key={e.entity_id} value={e.entity_id} label={`${e.name ?? e.entity_id} · ${e.state}${e.unit ? ` ${e.unit}` : ''}`} />
                     ))}
                   </datalist>
-                ))}
-                {sensorConfig.ha_error && <div className="small err">{sensorConfig.ha_error}: the sensor list is empty.</div>}
-                {['source', 'mode', 'powerlimit'].map((key) => (
-                  <div key={key} className="field">
-                    <span>{sensorConfig.labels[key]}{sensorConfig.optional.includes(key) && <span className="unit"> optional</span>}</span>
-                    {input(key, sensorDraft[key] ?? '', setField(key), sensorConfig.labels[key])}
-                    {note(sensorDraft[key] ?? '')}
+                  <div className="tool-form">
+                    <button type="button" className="btn" onClick={saveConfig} disabled={configResult?.ok}>Save &amp; restart</button>
+                    {configDraft !== (config.yaml ?? '') && !configResult?.ok && (
+                      <button type="button" className="btn-link" onClick={() => setConfigDraft(config.yaml ?? '')}>Undo changes</button>
+                    )}
                   </div>
-                ))}
-                <div className="field">
-                  <span>{sensorConfig.labels.grid_power} <span className="unit">one sensor per phase, W or kW, + import / − export</span></span>
-                  {phases.map((id, i) => (
-                    <div key={i} className="sensor-phase">
-                      <div className="sensor-row">
-                        {input('grid_power', id, (value) => setPhases(phases.map((p, j) => (j === i ? value : p))), `${sensorConfig.labels.grid_power} ${i + 1}`)}
-                        <button type="button" className="iconbtn" aria-label={`Remove grid power sensor ${i + 1}`} disabled={phases.length === 1}
-                          onClick={() => setPhases(phases.filter((_, j) => j !== i))}>
-                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
-                        </button>
-                      </div>
-                      {note(id)}
-                    </div>
-                  ))}
-                  <button type="button" className="btn-link sensor-add" onClick={() => setPhases([...phases, ''])}>+ Add sensor</button>
-                  {netW !== null && (
-                    <span className="small num">Net grid now: {Math.round(Math.abs(netW))} W {netW >= 0 ? 'import' : 'export'}</span>
-                  )}
-                </div>
-                <div className="field">
-                  <span>{sensorConfig.labels.nordpool}</span>
-                  {input('nordpool', sensorDraft.nordpool ?? '', setField('nordpool'), sensorConfig.labels.nordpool)}
-                  {note(sensorDraft.nordpool ?? '')}
-                </div>
-                <div className="tool-form">
-                  <button type="button" className="btn" onClick={() => sendSensors('PUT')}>Save sensors</button>
-                  {sensorConfig.saved && <button type="button" className="btn-link" onClick={() => sendSensors('DELETE')}>Use the add-on options</button>}
-                </div>
-                {sensorStatus && <div className={`small ${sensorStatus.ok ? 'ok' : 'err'}`}>{sensorStatus.text}</div>}
-                <div className="muted small">
-                  Start typing to search your Home Assistant sensors. Sensors saved here override the add-on configuration
-                  {sensorConfig.saved ? '.' : '; until then the tracker uses the add-on options.'}
-                </div>
-              </>
-            );
-          })()}
+                  {configResult && <div className={`small ${configResult.ok ? 'ok' : 'err config-msg'}`}>{configResult.text}</div>}
+                  <div className="muted small">
+                    The same options as the add-on&apos;s Configuration tab in Home Assistant; the Documentation tab explains them.
+                    Saving restarts the add-on (a few seconds), and the page reloads when it&apos;s back.
+                  </div>
+                </>
+              ) : (
+                <div className="muted small">{config.message}</div>
+              )}
+            </>
+          )}
         </div>
         <div className="divider" />
         <div className="tool">
@@ -1170,69 +1105,6 @@ function App() {
           <div className="muted small">
             Replays Home Assistant history through the tracker; rows in the range are recomputed. History is kept for <code>purge_keep_days</code> (10 days by default).
           </div>
-        </div>
-        <div className="divider" />
-        <div className="tool">
-          <button type="button" className="disclosure" aria-expanded={feesOpen} onClick={() => setFeesOpen(!feesOpen)}>
-            <span className="tool-title">Electricity fees</span>
-            <span className="muted small">
-              {feeConfig ? `${feeConfig.packages[feeConfig.values.network_package]?.label ?? ''} · ` : ''}{feesOn ? 'included in net' : 'not included'}
-            </span>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ transform: feesOpen ? 'rotate(180deg)' : undefined }}><path d="m6 9 6 6 6-6" /></svg>
-          </button>
-          {feesOpen && feeConfig && (
-            <>
-              {(() => {
-                const pkgId = feeDraft.network_package ?? feeConfig.values.network_package;
-                const pkg = feeConfig.packages[pkgId];
-                const isCustom = !pkg?.rates;
-                const hasPeaks = isCustom || Number(feeDraft.elektrilevi_day_peak) > 0;
-                const networkKeys = feeConfig.network_keys.filter((k) => hasPeaks || !k.endsWith('_peak'));
-                const otherKeys = Object.keys(feeConfig.labels).filter((k) => !feeConfig.network_keys.includes(k));
-                const field = (k, disabled = false) => (
-                  <label key={k} className="field">
-                    <span>{feeConfig.labels[k]} <span className="unit">{k === 'vat' ? '%' : feeConfig.unit}</span></span>
-                    <input type="text" inputMode="decimal" value={feeDraft[k] ?? ''} placeholder={String(feeConfig.defaults[k])}
-                      disabled={disabled} onChange={(e) => setFeeDraft({ ...feeDraft, [k]: e.target.value })} />
-                  </label>
-                );
-                return (
-                  <>
-                    <div className="field">
-                      <span>Network package</span>
-                      <div className="seg seg-sm" role="group" aria-label="Network package">
-                        {Object.entries(feeConfig.packages).map(([id, p]) => (
-                          <button key={id} type="button" className={pkgId === id ? 'on' : ''} aria-pressed={pkgId === id} onClick={() => pickPackage(id)}>
-                            {id === 'custom' ? 'Custom' : p.label.replace('Elektrilevi ', '')}
-                          </button>
-                        ))}
-                      </div>
-                      <span className="small">{pkg?.label}{pkg?.note ? ` · ${pkg.note}` : ''}{!isCustom ? ' · price list from 1 June 2026' : ''}</span>
-                    </div>
-                    <div className="fee-grid">{networkKeys.map((k) => field(k, !isCustom))}</div>
-                    {hasPeaks && (
-                      <div className="muted small">
-                        Peak rates apply November–March: day peak on working days 09–12 and 16–20, weekend peak on weekends and holidays 16–20.
-                        {isCustom && ' Leave them at 0 if your package has no peak hours.'}
-                      </div>
-                    )}
-                    <div className="divider" />
-                    <div className="fee-grid">{otherKeys.map((k) => field(k))}</div>
-                  </>
-                );
-              })()}
-              <div className="tool-form">
-                <button type="button" className="btn" onClick={() => saveFees(feeDraft)}>Save fees</button>
-                <button type="button" className="btn-link" onClick={() => saveFees(feeConfig.defaults)}>Reset to defaults</button>
-              </div>
-              {feeStatus && <div className={`small ${feeStatus.ok ? 'ok' : 'err'}`}>{feeStatus.text}</div>}
-              <div className="muted small">
-                Cents/kWh excl. VAT. Import = (spot + fees) × (1 + VAT); export = spot − export fees. Night/weekend network rate
-                before 07:00, from 22:00, on weekends and Estonian public holidays. Monthly network fees are fixed costs and not included.
-                Turn on <strong>Fees</strong> in the header to use them.
-              </div>
-            </>
-          )}
         </div>
         <div className="divider" />
         <div className="tool">
