@@ -5,3 +5,4 @@ fastapi==0.142.2
 uvicorn[standard]==0.54.0
 sqlite-utils==4.2.1
 pip-system-certs==5.3
+websockets==17.2

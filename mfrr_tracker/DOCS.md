@@ -33,8 +33,8 @@ With `publish_sensors` on, the add-on updates these entities every minute:
 | `sensor.mfrr_net_total` | € | All-time net result, `state_class: total`. |
 | `sensor.mfrr_energy_today` | kWh | Delivered mFRR/aFRR energy today. |
 | `sensor.mfrr_energy_total` | kWh | All-time delivered energy, `state_class: total`. |
-| `sensor.mfrr_activation_income_total` | € | All-time activation payout: your share of the activation revenue after Kratt's fee, without the bill effect. `state_class: total`. For the Energy dashboard. |
-| `sensor.mfrr_energy_dashboard_zero` | kWh | Always 0. Helper for the Energy dashboard. |
+| `sensor.mfrr_activation_income_total` | € | All-time activation payout: your share of the activation revenue after Kratt's fee, without the bill effect. Uses the official Qilowatt figures for slots covered by an imported revenue report (attributes `official_slots` / `estimated_slots`). |
+| `sensor.mfrr_energy_dashboard_zero` | kWh | Always 0. Helper from version 1.1.0; use the statistics below for the Energy dashboard instead. |
 | `sensor.mfrr_last_activation` | timestamp | Start of the latest activation. Attributes: market, direction, energy, net. |
 | `sensor.mfrr_price_up` / `sensor.mfrr_price_down` | €/kWh | Price of the latest priced mFRR activation per direction. |
 | `sensor.afrr_price_up` / `sensor.afrr_price_down` | €/kWh | The same for aFRR (`source: estimate` until Volton publishes). |
@@ -48,21 +48,34 @@ Notes:
 
 `sensor.mfrr_net_total`, `sensor.mfrr_energy_total` and `sensor.mfrr_activation_income_total` have a `state_class`, so Home Assistant keeps long-term statistics for them. Use them in a **Statistics graph** card with the *change* statistic to see the result per day, week or month. `sensor.mfrr_energy_total` can also be added to the Energy dashboard as an individual device.
 
-The Energy dashboard has no place for balancing income, but the Kratt payout can be added to its costs as an extra grid return that has no energy:
+The Energy dashboard has no place for balancing income, but the Kratt payout can be added to its costs as an extra grid return that has no energy. For this, the add-on writes two hourly statistics to Home Assistant itself (they're listed in **Developer Tools → Statistics**):
+
+| Statistic | Contents |
+|---|---|
+| `mfrr_tracker:activation_payout` (**mFRR activation payout**) | Your activation payout per hour, € |
+| `mfrr_tracker:energy_zero` (**mFRR zero energy**) | Always 0 kWh |
+
+Setup:
 
 1. **Settings → Dashboards → Energy → Electricity grid → Add return.**
-2. Energy sensor: **`sensor.mfrr_energy_dashboard_zero`**. It always reports 0 kWh, so the energy totals and flows don't change.
-3. Compensation: **Use an entity tracking the total compensation**, then pick **`sensor.mfrr_activation_income_total`**.
+2. Energy: **mFRR zero energy**. The energy totals and flows don't change.
+3. Compensation: **Use an entity tracking the total compensation**, then pick **mFRR activation payout**.
 
 The grid cost then includes the activation payout. Only the payout is added, because the rest of an activation's result, the extra import or export, is already measured by your grid meter and priced by the Energy dashboard. Don't use `sensor.mfrr_net_total` here, because that would count the bill effect twice. Don't attach anything to your real grid return sensor either: that replaces your normal export compensation.
 
+**Estimate first, actual later.** Each 15-minute slot is booked in the hour it belongs to, and is corrected in place when better figures arrive:
+
+- the mFRR price from the Baltic Transparency Dashboard, about an hour after the slot
+- Volton's aFRR clearing price, which replaces the 440 / −530 €/MWh estimate
+- a backfill, which recomputes past rows
+- an imported **Qilowatt balancing revenue report**: for every slot it covers, the official revenue share replaces the tracker's estimate. Upload the CSV under **Data tools** whenever you get a report (weekly, monthly), or post it to `/api/qw-report`.
+
+The statistics are updated every 5 minutes, and right after a report import. Past hours in the Energy dashboard then show the corrected figures. Until a figure is known, the hour contains the tracker's estimate, or nothing if the price isn't published yet.
+
 Notes:
 
-- The payout is the tracker's estimate, not the official figure from the Qilowatt report.
-- It's added in the hour its price is published, about an hour after the activation, not in the activation's own hour.
-- A backfill recomputes past rows and can adjust the total. The dashboard records the change in the hour it happens.
 - Home Assistant's currency (Settings → System → General) must be EUR.
-- The sensors appear in the Energy settings once Home Assistant has compiled their statistics, which can take up to an hour after the first start.
+- If you set this up with version 1.1.0 (`sensor.mfrr_energy_dashboard_zero` and `sensor.mfrr_activation_income_total`), switch the return to the two statistics above and delete the old one. The sensor books every correction in the hour it happens instead of the hour it belongs to.
 
 ## Data
 

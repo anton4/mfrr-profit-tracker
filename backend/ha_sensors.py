@@ -11,9 +11,9 @@ from sqlite_utils import Database
 
 import config
 import fees
+import ha_statistics
 from ha import HA_URL, _HEADERS
 
-PUBLISH_SENSORS = os.getenv("PUBLISH_SENSORS", "false").strip().lower() in ("1", "true", "yes", "on")
 PREFIX = os.getenv("SENSOR_PREFIX", "mfrr")
 
 tz = pytz.timezone("Europe/Tallinn")
@@ -56,6 +56,7 @@ def build_states(db: Database, now: datetime | None = None) -> dict[str, tuple]:
     today = _totals([r for r in rows if r["timeslot"] >= day_start.isoformat()])
     month = _totals([r for r in rows if r["timeslot"] >= month_start.isoformat()])
     total = _totals(rows)
+    payouts, official_slots, estimated_slots = ha_statistics.slot_payouts(db)
 
     states = {
         # Running totals: state_class "total" gives long-term statistics (statistics cards,
@@ -64,12 +65,12 @@ def build_states(db: Database, now: datetime | None = None) -> dict[str, tuple]:
             **_EUR, "state_class": "total", "friendly_name": "mFRR net result (total)", **total}),
         f"sensor.{PREFIX}_energy_total": (total["energy_kwh"], {
             **_KWH, "state_class": "total", "friendly_name": "mFRR delivered energy (total)"}),
-        # Energy dashboard: a grid "return" with the 0 kWh helper as energy and the payout as
-        # "entity tracking the total compensation". Only the payout, because the bill effect of
-        # activations is already metered and priced by the dashboard itself.
-        f"sensor.{PREFIX}_activation_income_total": (
-            round(sum(r.get("profit") or 0.0 for r in rows if r.get("net_total") is not None), 4), {
-                **_EUR, "state_class": "total", "friendly_name": "mFRR activation payout (total)"}),
+        # Payout total, official Qilowatt figures where a report is imported. For the Energy
+        # dashboard, use the hourly statistics from ha_statistics instead: this sensor books
+        # later corrections in the hour they happen. The 0 kWh helper is kept for 1.1.0 setups.
+        f"sensor.{PREFIX}_activation_income_total": (round(sum(payouts.values()), 4), {
+            **_EUR, "state_class": "total", "friendly_name": "mFRR activation payout (total)",
+            "official_slots": official_slots, "estimated_slots": estimated_slots}),
         f"sensor.{PREFIX}_energy_dashboard_zero": (0, {
             **_KWH, "state_class": "total_increasing", "friendly_name": "mFRR Energy dashboard helper (0 kWh)"}),
         f"sensor.{PREFIX}_net_today": (today["net"], {
@@ -104,7 +105,7 @@ def build_states(db: Database, now: datetime | None = None) -> dict[str, tuple]:
 
 
 def publish_sensors():
-    if not PUBLISH_SENSORS:
+    if not config.PUBLISH_SENSORS:
         return
     db = Database(config.DB_PATH)
     try:
