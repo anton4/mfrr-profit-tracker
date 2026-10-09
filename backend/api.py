@@ -228,6 +228,16 @@ def get_qw_report(
     """Official per-slot figures from imported Qilowatt revenue reports."""
     return qw_report.report_slots(_normalize_to_local_iso(from_ts), _normalize_to_local_iso(to_ts))
 
+class UIFiles(StaticFiles):
+    """The built frontend. index.html is revalidated on every load, so an add-on update shows up
+    right away; the files in assets/ have content hashes in their names and can stay cached."""
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        if response.headers.get("content-type", "").startswith("text/html"):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
+
 # Serve the built frontend from the same container (must be mounted after the API routes)
 if os.path.isdir(STATIC_DIR):
-    app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="ui")
+    app.mount("/", UIFiles(directory=STATIC_DIR, html=True), name="ui")
