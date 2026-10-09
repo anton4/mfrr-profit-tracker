@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.5.0
+
+- **Kratt right now** at the top of the page: whether a command is active, UP or DOWN, mFRR or aFRR, since when, the requested and delivered power, the grid power and the baseline. Next to it, a chart of the last two hours: grid power, Kratt's target (baseline ± requested) and the commands as bands. Hover or use the arrow keys for the values at a moment; the table view lists them per minute. After a restart, the chart is filled from Home Assistant's history.
+- A restart during an activation no longer sets its baseline to 0 W: the baseline is taken from the history before the command.
+- Changed prices and fees (Kratt share, aFRR estimates, electricity fees and network package) apply either **from now on** or to **all history**. **Data tools → Configuration** asks when you save; a change in Home Assistant's Configuration tab applies from now on.
+
 ## 1.4.1
 
 - **Data tools → Configuration** has two views again: a form with a field for every option, and the raw YAML. Switch between them at any time; both save the same add-on options.

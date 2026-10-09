@@ -19,6 +19,7 @@ import backfill
 import qw_report
 import fees
 import addon_config
+import price_settings
 import config
 import entsoe_cbmp
 import ha
@@ -28,6 +29,7 @@ import sensors
 async def lifespan(app: FastAPI):
     print("✅ Starting all schedulers from FastAPI")
     ha.log_sensor_check()
+    price_settings.reconcile()   # a price or fee change since the last start applies now
     print("💶 aFRR market price (CBMP): "
           + ("ENTSO-E token set" if entsoe_cbmp.configured() else "ENTSO-E token not set, not shown"))
     main.write_current_timeslot()
@@ -113,10 +115,9 @@ def get_mffr_data(
         print(f"DB query failed: where='{where_clause}' args={params} err={e}")
         raise
 
-    # Variant with seller and network fees, computed with the current fee settings
-    fee_values = fees.get_fees()
+    # Variant with seller and network fees, with the fees in effect at each slot
     for row in rows:
-        fees.add_fee_columns(row, fee_values)
+        fees.add_fee_columns(row, price_settings.at(row["timeslot"])["fees"])
 
     # One row per slot, market and direction, keyed by id
     return {row["id"]: row for row in rows}
@@ -201,6 +202,8 @@ def save_config(request: Request, payload: dict = Body(...)):
         if not isinstance(options, dict):
             raise ValueError("No options to save")
         addon_config.save_options(addon_config.unmask(options, current))
+        if payload.get("scope"):   # whether changed prices and fees apply to all history or from now on
+            price_settings.set_pending(payload["scope"])
     except ValueError as e:
         raise HTTPException(400, str(e))
     except requests.RequestException as e:

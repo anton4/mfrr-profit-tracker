@@ -4,6 +4,16 @@ The add-on reads your Qilowatt and grid power sensors every 10 seconds and recor
 
 The add-on talks to Home Assistant through the Supervisor, so you don't need a long-lived access token.
 
+## Kratt right now
+
+The top of the page shows the current Kratt command: UP or DOWN, mFRR or aFRR, since when, the power Kratt requested, the power delivered (grid power against the baseline) and the grid power. The chart next to it covers the last two hours, updated every 10 seconds:
+
+- **Grid power** (blue): the summed phases, + import / − export.
+- **Kratt target** (orange, dashed): the baseline plus the requested power in the commanded direction. The closer the grid follows it, the closer the delivery is to 100 %.
+- **Bands**: the periods with a DOWN or UP command.
+
+Hover over the chart, or focus it and use the arrow keys, to read the values at a moment. **Table view** lists them per minute.
+
 ## Configuration
 
 All settings are add-on options; there is no second place. Edit them in either of two ways:
@@ -26,6 +36,15 @@ All settings are add-on options; there is no second place. Edit them in either o
 | `fee_network_package` | Elektrilevi network package (`vork1`, `vork2`, `vork4`, `vork5`) or `custom`. |
 | `fee_*` | Optional fees in cents/kWh excl. VAT (`fee_vat` in %): `fee_margin`, `fee_taastuv`, `fee_aktsiis`, `fee_tasakaal`, `fee_varustus`, `fee_vat`, `fee_export_margin`, `fee_export_tasakaal`, and for a `custom` package `fee_elektrilevi_day`, `fee_elektrilevi_night`, `fee_elektrilevi_day_peak`, `fee_elektrilevi_holiday_peak`. A Võrk package brings its own network rates. |
 | `publish_sensors` | Publish the summary sensors below to Home Assistant. |
+
+### Changing prices and fees
+
+The Kratt share, the aFRR price estimates and the electricity fees (including the network package) are kept with the time they apply from. When you change them:
+
+- **From now on:** activations so far keep the values they were calculated with. The current 15-minute slot and later ones use the new values.
+- **All history:** every activation is recalculated with the new values, including the aFRR estimates of activations still waiting for a published price.
+
+**Data tools → Configuration** asks which one you want when you save. A change made in Home Assistant's Configuration tab applies from now on. The add-on log shows each change and how it was applied.
 
 ### Sensor IDs
 

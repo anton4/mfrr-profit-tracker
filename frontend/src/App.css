@@ -387,6 +387,7 @@ button { font: inherit; }
 .config-row .iconbtn:disabled { opacity: 0.4; cursor: default; }
 .config-add { align-self: flex-start; height: 32px; padding: 0; }
 .field .switch, .field .seg { align-self: flex-start; }
+.config-scope { padding: 12px; border-radius: 10px; background: var(--warn-soft); }
 /* YAML errors point at the column with a caret: keep line breaks and alignment */
 .config-msg { white-space: pre-wrap; font-family: 'Geist Mono', ui-monospace, monospace; font-size: 12px; }
 

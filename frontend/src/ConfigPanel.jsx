@@ -11,6 +11,9 @@ const GROUPS = [
   ['Home Assistant', () => true],
 ];
 
+// Options whose change can apply to all history or only from now on
+const isPriceKey = (k) => k === 'kratt_share' || k.startsWith('afrr_') || k.startsWith('fee_');
+
 // Form values: text inputs hold strings, lists one string per row, switches booleans
 const toValues = (fields, options) => Object.fromEntries(fields.map((f) => {
   const v = options[f.key];
@@ -62,6 +65,7 @@ export default function ConfigPanel({ apiBase, sensorStatus, startedAt, onRestar
   const [yamlText, setYamlText] = useState('');
   const [result, setResult] = useState(null);
   const [sensorQuery, setSensorQuery] = useState('');
+  const [scope, setScope] = useState('now');    // how changed prices and fees apply
   const yamlRef = useRef(null);
 
   const apply = (data) => {
@@ -86,9 +90,12 @@ export default function ConfigPanel({ apiBase, sensorStatus, startedAt, onRestar
   const entityById = Object.fromEntries(entities.map((e) => [e.entity_id, e]));
   const set = (key, value) => setValues((v) => ({ ...v, [key]: value }));
   const formOptions = () => toOptions(cfg.fields, values, extra);
-  const dirty = mode === 'form'
-    ? JSON.stringify(values) !== JSON.stringify(toValues(cfg.fields, cfg.options))
-    : yamlText !== cfg.yaml;
+  const loaded = toValues(cfg.fields, cfg.options);
+  const dirty = mode === 'form' ? JSON.stringify(values) !== JSON.stringify(loaded) : yamlText !== cfg.yaml;
+  // In the YAML view any edit may touch prices, so the choice is shown for every change
+  const priceChange = mode === 'form'
+    ? cfg.fields.some((f) => isPriceKey(f.key) && JSON.stringify(values[f.key]) !== JSON.stringify(loaded[f.key]))
+    : dirty;
 
   const switchTo = async (next) => {
     if (next === mode) return;
@@ -112,7 +119,8 @@ export default function ConfigPanel({ apiBase, sensorStatus, startedAt, onRestar
   const save = async () => {
     setResult(null);
     try {
-      await post(`${apiBase}/api/config`, mode === 'form' ? { options: formOptions() } : { yaml: yamlText });
+      const body = mode === 'form' ? { options: formOptions() } : { yaml: yamlText };
+      await post(`${apiBase}/api/config`, priceChange ? { ...body, scope } : body);
     } catch (e) {
       setResult({ ok: false, text: e.message });
       return;
@@ -284,6 +292,21 @@ export default function ConfigPanel({ apiBase, sensorStatus, startedAt, onRestar
           </div>
         </>
       )}
+      {priceChange && (
+        <div className="field config-scope">
+          <span className="config-label">{mode === 'form' ? 'Changed prices and fees apply to' : 'If prices or fees changed, they apply to'}</span>
+          <div className="seg seg-sm" role="group" aria-label="Apply changed prices and fees to">
+            {[['now', 'From now on'], ['all', 'All history']].map(([s, text]) => (
+              <button key={s} type="button" className={scope === s ? 'on' : ''} aria-pressed={scope === s} onClick={() => setScope(s)}>{text}</button>
+            ))}
+          </div>
+          <span className="muted small">
+            {scope === 'now'
+              ? 'Activations so far keep the values they were calculated with; the current 15-minute slot and later use the new ones.'
+              : 'Every activation is recalculated with the new values, also the aFRR estimates still waiting for a published price.'}
+          </span>
+        </div>
+      )}
       <div className="tool-form">
         <button type="button" className="btn" onClick={save} disabled={result?.ok}>Save &amp; restart</button>
         {dirty && !result?.ok && <button type="button" className="btn-link" onClick={undo}>Undo changes</button>}
@@ -291,7 +314,8 @@ export default function ConfigPanel({ apiBase, sensorStatus, startedAt, onRestar
       {result && <div className={`small ${result.ok ? 'ok' : 'err config-msg'}`}>{result.text}</div>}
       <div className="muted small">
         The same options as the add-on&apos;s Configuration tab in Home Assistant. Saving restarts the add-on
-        (a few seconds), and the page reloads when it&apos;s back.
+        (a few seconds), and the page reloads when it&apos;s back. Prices and fees changed in Home Assistant&apos;s
+        Configuration tab apply from the next start on.
       </div>
     </>
   );

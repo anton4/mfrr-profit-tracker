@@ -6,13 +6,13 @@ from sqlite_utils import Database
 
 import fees
 import config
+import price_settings
 
 DB_PATH = config.DB_PATH
 tz = pytz.timezone("Europe/Tallinn")
 
 # ---- Tunables (can be overridden via env) ----
-# Kratt keeps 20% → you receive 80% of activation revenue
-KRATT_SHARE = float(os.getenv("KRATT_SHARE", "0.20"))   # 0.20 = 20%
+# Kratt's share and the fees come from price_settings: the values in effect at each slot
 # Minimum energy to consider (filter noise)
 MIN_ENERGY_KWH = float(os.getenv("MIN_ENERGY_KWH", "0.00001"))
 
@@ -23,7 +23,6 @@ def run_profit_calculation():
     db = Database(DB_PATH)
     now = datetime.now(tz)
     updated = False
-    fee_values = fees.get_fees()
 
     # Only (re)compute finished slots
     for row in db["slots"].rows_where("profit IS NULL OR net_total IS NULL"):
@@ -53,7 +52,9 @@ def run_profit_calculation():
         mffr_eur_per_kwh = (mffr_price / 1000.0)
 
         # Your share of activation revenue after Kratt
-        your_share = (1.0 - KRATT_SHARE)
+        prices = price_settings.at(row["timeslot"])
+        kratt_share = prices["kratt_share"]
+        your_share = (1.0 - kratt_share)
 
         if direction == "DOWN":
             # Commanded DOWN: you increase grid import (or reduce export).
@@ -66,11 +67,11 @@ def run_profit_calculation():
         else:
             # Unknown direction
             continue
-        kratt_fee = activation_income * (KRATT_SHARE / your_share) if your_share > 0 else 0.0
+        kratt_fee = activation_income * (kratt_share / your_share) if your_share > 0 else 0.0
 
         # Electricity bill effect of the activation only (vs. the baseline), spot + VAT on import.
         # The variant with seller and network fees is computed per request in api.py.
-        bill_effect = fees.bill_effect(row, with_fees=False, fees=fee_values)
+        bill_effect = fees.bill_effect(row, with_fees=False, fees=prices["fees"])
 
         net_total     = activation_income + bill_effect
         price_per_kwh = (net_total / energy_kwh) if energy_kwh > 0 else None
