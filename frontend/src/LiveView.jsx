@@ -4,8 +4,9 @@
 // detailed enough, and the commands as UP/DOWN bands. Live follows now from the tracker's own
 // readings; any other window comes from Home Assistant (/api/graph: 10 s history up to 6 h,
 // 5-minute or hourly statistics beyond). Navigate with the presets, ◀ ▶, Go to, the 7-day
-// overview strip, dragging (pan), Shift-drag (zoom to a range), Ctrl/⌘ + scroll or pinch (zoom)
-// and double-click (zoom out). Hover or arrow keys read values; the table view lists them.
+// overview strip, scrolling or pinch (zoom), dragging (zoom to the selected range), Shift-drag,
+// sideways scroll or a touch drag (pan) and double-click (zoom out). Hover or arrow keys read
+// values; the table view lists them.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 const POLL_MS = 10000;
@@ -44,6 +45,8 @@ const clock = (ms, seconds = false) => new Date(ms).toLocaleTimeString([], {
 });
 const dayLabel = (ms) => new Date(ms).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'numeric' });
 const stamp = (ms) => `${new Date(ms).toLocaleDateString('et-EE')} ${clock(ms)}`;
+const fmtSpan = (ms) => (ms < 2 * HOUR ? `${Math.round(ms / MIN)} min`
+  : ms < 2 * DAY ? `${+(ms / HOUR).toFixed(1)} h` : `${+(ms / DAY).toFixed(1)} d`);
 const marketLabel = (m) => (m === 'AFRR' ? 'aFRR' : m === 'MFRR' ? 'mFRR' : null);
 // Where Kratt wants the grid: the baseline plus the requested power (DOWN = more import, UP = more export)
 const targetOf = (p) => (p.signal && p.baseline_w !== null && p.baseline_w !== undefined
@@ -112,7 +115,8 @@ function PowerChart({ data, bands, start, end, resolution, loading, onView }) {
   const [wrapRef, width] = useWidth();
   const svgRef = useRef(null);
   const [hover, setHover] = useState(null);       // index into data
-  const [selection, setSelection] = useState(null);   // [x0, x1] px while Shift-dragging
+  const [selection, setSelection] = useState(null);   // [x0, x1] px while dragging a range
+  const [panning, setPanning] = useState(false);
   const gesture = useRef(null);
   const pointers = useRef(new Map());
 
@@ -152,15 +156,24 @@ function PowerChart({ data, bands, start, end, resolution, loading, onView }) {
     return ((clientX - rect.left) / rect.width) * width;
   };
   const timeAt = (px) => start + ((px - PAD.left) / plotW) * span;
+  const inPlot = (px) => Math.max(PAD.left, Math.min(PAD.left + plotW, px));
   const zoomAround = (t, factor, s0 = start, e0 = end) => onView(t - (t - s0) * factor, t + (e0 - t) * factor);
 
-  // Ctrl/⌘ + scroll and trackpad pinch zoom (a native listener: React's wheel handler is passive)
+  // Scroll zooms around the pointer (trackpad pinch arrives as Ctrl + scroll); sideways scroll or
+  // Shift + scroll moves. A native listener: React's wheel handler is passive.
   const wheel = useRef(null);
   useEffect(() => {
     wheel.current = (e) => {
-      if (!(e.ctrlKey || e.metaKey)) return;
       e.preventDefault();
-      zoomAround(timeAt(toPx(e.clientX)), Math.exp(Math.max(-0.5, Math.min(0.5, e.deltaY * 0.004))));
+      const unit = e.deltaMode === 1 ? 33 : e.deltaMode === 2 ? plotW : 1;   // lines / pages → px
+      const dx = (e.shiftKey && !e.deltaX ? e.deltaY : e.deltaX) * unit;
+      const dy = e.shiftKey ? 0 : e.deltaY * unit;
+      if (Math.abs(dx) > Math.abs(dy)) {
+        const shift = (dx / plotW) * span;
+        onView(start + shift, end + shift);
+      } else if (dy) {
+        zoomAround(timeAt(toPx(e.clientX)), Math.exp(Math.max(-0.5, Math.min(0.5, dy * 0.004))));
+      }
     };
   });
   useEffect(() => {
@@ -177,8 +190,13 @@ function PowerChart({ data, bands, start, end, resolution, loading, onView }) {
     if (pointers.current.size === 2) {
       const [a, b] = [...pointers.current.values()];
       gesture.current = { kind: 'pinch', d0: Math.max(10, Math.abs(a - b)), mid: timeAt((a + b) / 2), start0: start, end0: end };
+      setSelection(null);
     } else {
-      gesture.current = { kind: e.shiftKey ? 'select' : 'pan', x0: toPx(e.clientX), start0: start, end0: end, moved: false };
+      // A mouse drag selects a range; Shift-drag or a finger moves the graph
+      const kind = e.shiftKey || e.pointerType === 'touch' ? 'pan' : 'select';
+      const x0 = kind === 'select' ? inPlot(toPx(e.clientX)) : toPx(e.clientX);
+      gesture.current = { kind, x0, start0: start, end0: end, moved: false };
+      setPanning(kind === 'pan');
     }
   };
   const onPointerMove = (e) => {
@@ -198,7 +216,12 @@ function PowerChart({ data, bands, start, end, resolution, loading, onView }) {
         setHover(null);
       }
     } else if (g.kind === 'select') {
-      setSelection([g.x0, px]);
+      const x1 = inPlot(px);
+      if (Math.abs(x1 - g.x0) > 3) g.moved = true;
+      if (g.moved) {
+        setSelection([g.x0, x1]);
+        setHover(null);
+      }
     } else if (g.kind === 'pinch' && pointers.current.size === 2) {
       const [a, b] = [...pointers.current.values()];
       zoomAround(g.mid, g.d0 / Math.max(10, Math.abs(a - b)), g.start0, g.end0);
@@ -207,14 +230,22 @@ function PowerChart({ data, bands, start, end, resolution, loading, onView }) {
   const onPointerUp = (e) => {
     pointers.current.delete(e.pointerId);
     const g = gesture.current;
-    if (g?.kind === 'select' && selection && Math.abs(selection[1] - selection[0]) > 6) {
-      const [a, b] = [Math.min(...selection), Math.max(...selection)];
-      onView(timeAt(a), timeAt(b));
+    if (e.type === 'pointerup' && g?.kind === 'select' && g.moved) {
+      const x1 = inPlot(toPx(e.clientX));
+      if (Math.abs(x1 - g.x0) > 6) onView(timeAt(Math.min(g.x0, x1)), timeAt(Math.max(g.x0, x1)));
     }
     setSelection(null);
-    if (!pointers.current.size) gesture.current = null;
+    if (!pointers.current.size) {
+      gesture.current = null;
+      setPanning(false);
+    }
   };
   const onKey = (e) => {
+    if (e.key === 'Escape' && gesture.current?.kind === 'select') {   // cancel the range being dragged
+      gesture.current = null;
+      setSelection(null);
+      return;
+    }
     if (e.key === '+' || e.key === '=') { e.preventDefault(); zoomAround(start + span / 2, 0.5); return; }
     if (e.key === '-' || e.key === '_') { e.preventDefault(); zoomAround(start + span / 2, 2); return; }
     if (!data.length) return;
@@ -227,11 +258,21 @@ function PowerChart({ data, bands, start, end, resolution, loading, onView }) {
   const hBands = h ? bands.filter((b) => b.startMs <= h.ms && b.endMs >= h.ms) : [];
   const tipLeft = h ? (x(h.ms) + 250 < width ? x(h.ms) + 12 : Math.max(0, x(h.ms) - 252)) : 0;
   const bucket = { '5min': 5 * MIN, '1h': HOUR }[resolution];
+  // The range being selected, as text over it
+  let selLabel = null;
+  if (selection) {
+    const [s0, s1] = [timeAt(Math.min(...selection)), timeAt(Math.max(...selection))];
+    const at = (ms) => (new Date(s0).toDateString() === new Date(s1).toDateString() ? clock(ms, s1 - s0 < 10 * MIN) : stamp(ms));
+    const text = `${at(s0)}–${at(s1)} · ${fmtSpan(s1 - s0)}`;
+    const half = text.length * 3.3;   // ~11 px font
+    const mid = (selection[0] + selection[1]) / 2;
+    selLabel = { text, x: Math.max(PAD.left + half, Math.min(PAD.left + plotW - half, mid)) };
+  }
 
   return (
     <div ref={wrapRef} className={`live-chart ${loading ? 'is-loading' : ''}`}>
-      <svg ref={svgRef} width={width} height={height} viewBox={`0 0 ${width} ${height}`} tabIndex={0}
-        role="img" aria-label="Grid power and Kratt commands. Drag to pan, Shift-drag to zoom into a range, Ctrl or ⌘ and scroll to zoom, double-click to zoom out, + and − to zoom, arrow keys to read values."
+      <svg ref={svgRef} width={width} height={height} viewBox={`0 0 ${width} ${height}`} tabIndex={0} className={panning ? 'is-panning' : ''}
+        role="img" aria-label="Grid power and Kratt commands. Scroll to zoom, drag to select a range and zoom into it, Shift-drag or scroll sideways to move, double-click to zoom out, + and − to zoom, arrow keys to read values."
         onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}
         onPointerLeave={() => { if (!gesture.current) setHover(null); }}
         onDoubleClick={(e) => zoomAround(timeAt(toPx(e.clientX)), 2)}
@@ -264,7 +305,10 @@ function PowerChart({ data, bands, start, end, resolution, loading, onView }) {
           <path d={path('grid_w')} className="live-line live-line-grid" />
         </g>
         {selection && (
-          <rect x={Math.min(...selection)} y={PAD.top} width={Math.abs(selection[1] - selection[0])} height={PLOT_H} className="live-selection" />
+          <g>
+            <rect x={Math.min(...selection)} y={PAD.top} width={Math.abs(selection[1] - selection[0])} height={PLOT_H} className="live-selection" />
+            <text x={selLabel.x} y={PAD.top + 14} textAnchor="middle" className="live-selection-label">{selLabel.text}</text>
+          </g>
         )}
         {h && (
           <g>
@@ -558,7 +602,7 @@ export default function LiveView({ apiBase, focus }) {
           <OverviewStrip data={overviewData} bands={bandsFromCommands(overview.commands)} start={overviewStart} end={overviewEnd}
             viewStart={start} viewEnd={end} onCenter={(t) => changeView(t - span / 2, t + span / 2)} />
         )}
-        <div className="muted small">Drag to move · Shift-drag to zoom into a range · Ctrl/⌘ + scroll or pinch to zoom · double-click to zoom out</div>
+        <div className="muted small">Scroll to zoom · drag to select a range and zoom in · Shift-drag or scroll sideways to move · double-click to zoom out</div>
         <details className="live-table">
           <summary className="small">Table view ({resolution === '10s' ? 'per minute' : resolution === '5min' ? '5-minute means' : 'hourly means'})</summary>
           <table>

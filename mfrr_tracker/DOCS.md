@@ -16,7 +16,7 @@ Moving around:
 
 - **Presets** (15 min to 7 days), **◀ ▶** to step a window back or forward, and **Live** to follow now.
 - **Go to** a date and time, or click or drag in the **7-day strip** below the graph.
-- **Drag** the graph to move it, **Shift-drag** across it to zoom into that range, **Ctrl/⌘ + scroll** or pinch to zoom, **double-click** to zoom out. With the graph focused: **+** / **−** zoom, the arrow keys read values.
+- **Scroll** over the graph (or pinch) to zoom, **drag** across it to select a range and zoom into it (Esc cancels), **Shift-drag** or scroll sideways to move it (on a touch screen, drag with one finger), **double-click** to zoom out. With the graph focused: **+** / **−** zoom, the arrow keys read values.
 - **Show in graph** (the chart icon) on an activation opens the graph around it.
 
 Hover over the graph to read the values at a moment; **Table view** lists them.

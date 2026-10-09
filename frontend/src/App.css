@@ -376,9 +376,13 @@ button { font: inherit; }
 }
 .live-goto .btn-link { height: 32px; }
 .live-chart.is-loading svg { opacity: 0.55; transition: opacity 0.2s ease; }
-.live-chart svg { cursor: grab; }
-.live-chart svg:active { cursor: grabbing; }
+.live-chart svg { cursor: crosshair; }
+.live-chart svg.is-panning { cursor: grabbing; }
 .live-selection { fill: var(--series-1); opacity: 0.12; stroke: var(--series-1); stroke-width: 1; }
+.live-selection-label {
+  font-size: 11px; font-weight: 600; fill: var(--text); font-variant-numeric: tabular-nums;
+  paint-order: stroke; stroke: var(--surface); stroke-width: 3px; stroke-linejoin: round;
+}
 .live-caption { min-height: 18px; }
 .live-overview svg { display: block; cursor: pointer; touch-action: pan-y; }
 .live-overview-line { stroke: var(--muted); stroke-width: 1.5; opacity: 0.8; }
