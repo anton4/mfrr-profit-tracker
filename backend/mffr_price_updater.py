@@ -39,15 +39,21 @@ sync_status = {
     # aFRR: estimated until Volton publishes the aFRR clearing price for the slot
     "afrr_source": "Volton aFRR clearing price",
     "afrr_last_check_at": None,
+    "afrr_last_success_at": None,
     "afrr_last_error": None,
     "afrr_estimated_slots": 0,
+    "afrr_next_check_at": None,   # None = no estimated slot waits for Volton
     # aFRR market price (CBMP) shown for comparison; income keeps the estimate
     "cbmp_source": entsoe_cbmp.SOURCE,
     "cbmp_configured": entsoe_cbmp.configured(),
     "cbmp_last_check_at": None,
+    "cbmp_last_success_at": None,
     "cbmp_last_error": None,
+    "cbmp_pending_slots": 0,
+    "cbmp_next_check_at": None,   # None = no aFRR slot waits for its market price
 }
 CBMP_MAX_AGE = timedelta(days=10)
+CBMP_INTERVAL = timedelta(minutes=30)   # today's prices are re-fetched at most hourly (TODAY_REFRESH)
 
 VOLTON_AFRR_URL = "https://public-data.volton.energy/v1/afrr-clearing-price/latest.json"
 AFRR_RECHECK = timedelta(hours=1)
@@ -200,12 +206,18 @@ def update_afrr_prices():
             if datetime.fromisoformat(r["timeslot"]) + SLOT <= now]
     sync_status["afrr_estimated_slots"] = len(rows)
     last = sync_status["afrr_last_check_at"]
-    if not rows or (last and now - datetime.fromisoformat(last) < AFRR_RECHECK):
+    if not rows:
+        sync_status["afrr_next_check_at"] = None
+        return
+    if last and now - datetime.fromisoformat(last) < AFRR_RECHECK:
+        sync_status["afrr_next_check_at"] = (datetime.fromisoformat(last) + AFRR_RECHECK).isoformat()
         return
     sync_status["afrr_last_check_at"] = now.isoformat()
+    sync_status["afrr_next_check_at"] = (now + AFRR_RECHECK).isoformat()
     try:
         prices = fetch_volton_afrr_prices()
         sync_status["afrr_last_error"] = None
+        sync_status["afrr_last_success_at"] = now.isoformat()
     except Exception as e:
         sync_status["afrr_last_error"] = str(e)
         log_error(f"❌ Failed to fetch Volton aFRR prices: {e}")
@@ -226,22 +238,24 @@ def update_afrr_prices():
 def update_afrr_cbmp():
     """Fill the aFRR market price (ENTSO-E PICASSO CBMP) on finished aFRR rows, on demand.
     Never touches mffr_price / profit: the income stays on the estimate, Volton or the report."""
-    if not entsoe_cbmp.configured():
-        return
     db = sqlite_utils.Database(DB_PATH)
-    if "slots" not in db.table_names():
+    if "slots" not in db.table_names() or "cbmp_points" not in db["slots"].columns_dict:
         return
     now = datetime.now(tz)
     rows = [r for r in db["slots"].rows_where(
                 "market = 'AFRR' AND timeslot >= ? AND (cbmp_points IS NULL OR (cbmp_points = 0 AND timeslot >= ?))",
                 [(now - CBMP_MAX_AGE).isoformat(), (now - timedelta(days=1)).isoformat()])
             if datetime.fromisoformat(r["timeslot"]) + SLOT <= now]
-    if not rows:
+    sync_status["cbmp_pending_slots"] = len(rows)   # also without a token: the UI says what waits
+    if not rows or not entsoe_cbmp.configured():
+        sync_status["cbmp_next_check_at"] = None
         return
     sync_status["cbmp_last_check_at"] = now.isoformat()
+    sync_status["cbmp_next_check_at"] = (now + CBMP_INTERVAL).isoformat()
     try:
         updated = entsoe_cbmp.fill_rows(db, rows)
         sync_status["cbmp_last_error"] = None
+        sync_status["cbmp_last_success_at"] = now.isoformat()
         if updated:
             print(f"✅ Set aFRR market price (CBMP) on {updated} row(s)")
     except Exception as e:
@@ -252,8 +266,9 @@ scheduler.add_job(
     update_afrr_cbmp,
     "interval",
     id="afrr_cbmp",
-    minutes=30,                       # today's prices are re-fetched at most hourly (TODAY_REFRESH)
-    next_run_time=datetime.now(tz),   # also right after startup
+    seconds=CBMP_INTERVAL.total_seconds(),
+    next_run_time=datetime.now(tz),   # also right after startup,
+    misfire_grace_time=None,          # however long the startup takes
     max_instances=1,
     coalesce=True
 )
@@ -263,6 +278,8 @@ scheduler.add_job(
     "interval",
     id="afrr_prices",
     minutes=5,
+    next_run_time=datetime.now(tz),   # also right after startup, so the status is current
+    misfire_grace_time=None,
     max_instances=1,
     coalesce=True
 )

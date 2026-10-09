@@ -1,5 +1,5 @@
 name: mFRR Profit Tracker
-version: "1.5.0"
+version: "1.5.1"
 slug: mfrr_tracker
 description: Track Kratt mFRR/aFRR activations, delivered energy and profit from Home Assistant sensors
 url: https://github.com/anton4/mfrr-profit-tracker

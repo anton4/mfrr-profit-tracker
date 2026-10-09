@@ -240,8 +240,6 @@ function App() {
     return () => { clearInterval(poll); clearInterval(tick); };
   }, []);
 
-  const fmtTime = (iso) =>
-    iso ? new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) : '-';
   const fmtSlot = (iso) => {
     if (!iso) return '-';
     const start = new Date(iso);
@@ -257,7 +255,32 @@ function App() {
   const fmtIn = (iso) => {
     if (!iso) return '';
     const sec = Math.max(0, Math.round((new Date(iso).getTime() - clock) / 1000));
-    return `(in ${sec} s)`;
+    return sec < 120 ? `(in ${sec} s)` : `(in ${Math.round(sec / 60)} min)`;
+  };
+  // One status chip per price source, with the same states everywhere:
+  // red = the last attempt failed, amber = slots waiting, green = nothing waiting, gray = not set up
+  const SYNC_STATES = {
+    error: ['dot-neg', 'error'], waiting: ['dot-warn', 'waiting'], ok: ['dot-pos', 'up to date'], off: ['dot-off', 'off'],
+  };
+  const syncChip = ({ id, title, hint, source, lastAt, nextAt, waiting, noun, error, lastSuccessAt, off }) => {
+    const state = off ? 'off' : error ? 'error' : waiting > 0 ? 'waiting' : 'ok';
+    const [dot, word] = SYNC_STATES[state];
+    const parts = [word, source];
+    if (off) parts.push(off);
+    else {
+      parts.push(lastAt ? `checked ${hm(lastAt)} ${fmtAgo(lastAt)}` : state === 'ok' ? 'nothing to price yet' : 'not checked yet');
+      parts.push(nextAt ? `next ${hm(nextAt)} ${fmtIn(nextAt)}` : 'next: not needed');
+    }
+    if (waiting > 0) parts.push(`${waiting} ${noun} waiting`);
+    return (
+      <div key={id} className={`chip ${state === 'error' ? 'chip-error' : ''}`}
+        title={`${hint} Green: nothing waiting · amber: waiting for prices · red: the last check failed · gray: not set up.`}>
+        <span className={`dot ${dot}`} />
+        <strong>{title}</strong>
+        <span className="muted">{parts.join(' · ')}</span>
+        {error && <span className="err">· failed: {error}{lastSuccessAt ? ` (last success ${hm(lastSuccessAt)})` : ''}</span>}
+      </div>
+    );
   };
 
 
@@ -649,17 +672,12 @@ function App() {
 
         {priceSync && (
           <div className="chips">
-            <div className={`chip ${priceSync.last_error ? 'chip-error' : ''}`} title="The dashboard is only queried when a finished mFRR slot is missing its price">
-              <span className={`dot ${priceSync.last_error ? 'dot-neg' : priceSync.next_sync_at ? 'dot-warn' : 'dot-pos'}`} />
-              <strong>mFRR prices</strong>
-              <span className="muted">
-                {priceSync.source}
-                {' · '}
-                {priceSync.last_sync_at ? `synced ${hm(priceSync.last_sync_at)} ${fmtAgo(priceSync.last_sync_at)}` : 'not synced yet'}
-                {' · '}
-                {priceSync.next_sync_at ? `next ${fmtTime(priceSync.next_sync_at)} ${fmtIn(priceSync.next_sync_at)}` : 'next: not needed'}
-              </span>
-            </div>
+            {syncChip({
+              id: 'mfrr', title: 'mFRR prices', source: priceSync.source,
+              hint: 'mFRR energy prices from the Baltic Transparency Dashboard, fetched only while a finished mFRR slot is missing its price.',
+              lastAt: priceSync.last_sync_at, nextAt: priceSync.next_sync_at, waiting: priceSync.pending_slots, noun: 'slot(s)',
+              error: priceSync.last_error, lastSuccessAt: priceSync.last_success_at,
+            })}
             {priceSync.latest_price_slot && (
               <div className="chip">
                 <strong>Latest price</strong>
@@ -668,30 +686,21 @@ function App() {
                 </span>
               </div>
             )}
-            {priceSync.pending_slots > 0 && (
-              <div className="chip"><strong>Waiting for prices</strong><span className="muted num">{priceSync.pending_slots} slot(s)</span></div>
-            )}
-            <div className={`chip ${priceSync.afrr_estimated_slots > 0 ? 'chip-warn' : ''}`} title="aFRR energy prices are estimated until Volton publishes the aFRR clearing price">
-              {priceSync.afrr_estimated_slots > 0 && <span className="dot dot-warn" />}
-              <strong>aFRR</strong>
-              <span>
-                {priceSync.afrr_estimated_slots > 0 ? `${priceSync.afrr_estimated_slots} slot(s) estimated` : 'no estimated prices'}
-                {priceSync.afrr_last_check_at && ` · Volton checked ${hm(priceSync.afrr_last_check_at)}`}
-                {priceSync.cbmp_configured
-                  ? ` · market price (CBMP) from ENTSO-E${priceSync.cbmp_last_check_at ? ` checked ${hm(priceSync.cbmp_last_check_at)}` : ''}`
-                  : ' · market price: ENTSO-E token not set'}
-                {priceSync.cbmp_last_error && <span className="err"> · {priceSync.cbmp_last_error}</span>}
-              </span>
-            </div>
-            {(priceSync.last_error || priceSync.afrr_last_error) && (
-              <div className="chip chip-error">
-                <strong>Error</strong>
-                <span>
-                  {priceSync.last_error || priceSync.afrr_last_error}
-                  {priceSync.last_success_at && ` (last successful sync ${fmtTime(priceSync.last_success_at)})`}
-                </span>
-              </div>
-            )}
+            {syncChip({
+              id: 'afrr', title: 'aFRR prices', source: 'Volton clearing price',
+              hint: 'aFRR income uses an estimate until Volton publishes the clearing price; checked hourly while slots are on the estimate (up to 3 days).',
+              lastAt: priceSync.afrr_last_check_at, nextAt: priceSync.afrr_next_check_at,
+              waiting: priceSync.afrr_estimated_slots, noun: 'slot(s) on the estimate',
+              error: priceSync.afrr_last_error, lastSuccessAt: priceSync.afrr_last_success_at,
+            })}
+            {syncChip({
+              id: 'cbmp', title: 'aFRR market price', source: 'ENTSO-E (CBMP)',
+              hint: 'The aFRR cross-border marginal price from ENTSO-E, shown for comparison only: income uses the estimate, Volton or a Qilowatt report.',
+              lastAt: priceSync.cbmp_last_check_at, nextAt: priceSync.cbmp_next_check_at,
+              waiting: priceSync.cbmp_pending_slots, noun: 'slot(s)',
+              error: priceSync.cbmp_last_error, lastSuccessAt: priceSync.cbmp_last_success_at,
+              off: !priceSync.cbmp_configured && 'set entsoe_token in Data tools → Configuration',
+            })}
           </div>
         )}
 

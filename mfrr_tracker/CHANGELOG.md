@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.5.1
+
+- The price status shows the three sources the same way: **mFRR prices** (Baltic Transparency Dashboard), **aFRR prices** (Volton) and **aFRR market price** (ENTSO-E). Each says whether it's up to date, waiting, failing or off, when it was checked, when it's checked next and how many slots wait for it. The separate Waiting and Error chips are gone.
+- The aFRR checks run right after a start. Before, the first ENTSO-E check was skipped when the start took more than a second, and Volton waited 5 minutes.
+- The Backfill panel says that a backfill keeps running when you leave the page.
+
 ## 1.5.0
 
 - **Kratt right now** at the top of the page: whether a command is active, UP or DOWN, mFRR or aFRR, since when, the requested and delivered power, the grid power and the baseline. Next to it, a chart of the last two hours: grid power, Kratt's target (baseline ± requested) and the commands as bands. Hover or use the arrow keys for the values at a moment; the table view lists them per minute. After a restart, the chart is filled from Home Assistant's history.
