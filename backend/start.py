@@ -3,12 +3,55 @@
 # As a Home Assistant add-on, the Supervisor writes the add-on options to /data/options.json and
 # provides SUPERVISOR_TOKEN. They're turned into the same environment variables the standalone
 # (docker-compose + .env) setup uses, before any module reads them at import time.
+# Every line written to stdout/stderr, uvicorn's included, gets a local timestamp.
 import json
 import os
 import shutil
+import sys
+import threading
+from datetime import datetime
+
+import pytz
+import uvicorn
 
 OPTIONS_FILE = "/data/options.json"
 IMPORT_DB = "/share/mfrr_tracker/mffr.db"   # database from a standalone install, copied once
+
+
+class _Timestamped:
+    """Stream wrapper that starts every line with the local time."""
+
+    def __init__(self, stream, tz):
+        self._stream = stream
+        self._tz = tz
+        self._line_start = True
+        self._lock = threading.Lock()
+
+    def write(self, text: str) -> int:
+        with self._lock:
+            out = []
+            # print() writes the text and the newline separately: track where lines start
+            for part in text.splitlines(keepends=True):
+                if self._line_start:
+                    out.append(datetime.now(self._tz).strftime("%Y-%m-%d %H:%M:%S "))
+                out.append(part)
+                self._line_start = part.endswith(("\n", "\r"))
+            self._stream.write("".join(out))
+            if self._line_start:
+                self._stream.flush()   # whole lines right away, also without PYTHONUNBUFFERED
+        return len(text)
+
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
+
+
+def timestamp_output() -> None:
+    try:
+        tz = pytz.timezone(os.getenv("TZ") or "Europe/Tallinn")
+    except pytz.UnknownTimeZoneError:
+        tz = pytz.utc
+    sys.stdout = _Timestamped(sys.stdout, tz)
+    sys.stderr = _Timestamped(sys.stderr, tz)
 
 
 def _env_value(value) -> str | None:
@@ -42,6 +85,8 @@ def load_addon_options(path: str = OPTIONS_FILE) -> None:
 
 
 if __name__ == "__main__":
+    timestamp_output()
     if os.path.isfile(OPTIONS_FILE):
         load_addon_options()
-    os.execvp("uvicorn", ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000"])
+    # In-process, so uvicorn's log handlers write to the timestamped stderr
+    uvicorn.run("api:app", host="0.0.0.0", port=8000)
