@@ -3,6 +3,13 @@
 
 Track Manual Frequency Restoration Reserve (mFRR) activations dispatched by **Kratt**, along with grid energy, prices, and profits, in near real-time using Home Assistant. It runs as a single container: a FastAPI backend that also serves the React frontend.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshot-dark.png">
+  <img src="docs/screenshot-light.png" width="100%" alt="mFRR Profit Tracker: the Kratt command right now, a graph of the day's grid power with the DOWN and UP commands (aFRR striped), the price status, and the day's result, energy, activations and prices by direction">
+</picture>
+
+<sub>A demo day: the current Kratt command, the day's grid power with every command, and what the activations earned.</sub>
+
 > Originally created by [martinarva](https://github.com/martinarva) as [MFFR-Profit-Tracker](https://github.com/martinarva/MFFR-Profit-Tracker) for Fusebox. This fork adapts it to Kratt.
 
 * * * * *
