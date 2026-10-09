@@ -10,7 +10,9 @@ The top of the page shows the current Kratt command: UP or DOWN, mFRR or aFRR, s
 
 - **Grid power** (blue): the summed phases, + import / − export.
 - **Kratt target** (orange, dashed): the baseline plus the requested power in the commanded direction. The closer the grid follows it, the closer the delivery is to 100 %.
-- **Bands**: the periods with a DOWN or UP command.
+- **Bands**: the periods with a DOWN or UP command; aFRR striped, mFRR solid.
+
+Click an entry in the legend to hide or show it on the graph; the choice is remembered in this browser.
 
 Moving around:
 

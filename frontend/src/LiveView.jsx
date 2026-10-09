@@ -1,12 +1,12 @@
 // frontend/src/LiveView.jsx — the Kratt command right now, and a graph of grid power for any time.
 //
 // One axis (W): measured grid power, Kratt's target (baseline ± requested) where the window is
-// detailed enough, and the commands as UP/DOWN bands. Live follows now from the tracker's own
-// readings; any other window comes from Home Assistant (/api/graph: 10 s history up to 6 h,
-// 5-minute or hourly statistics beyond). Navigate with the presets, ◀ ▶, Go to, the 7-day
-// overview strip, scrolling or pinch (zoom), dragging (zoom to the selected range), Shift-drag,
-// sideways scroll or a touch drag (pan) and double-click (zoom out). Hover or arrow keys read
-// values; the table view lists them.
+// detailed enough, and the commands as UP/DOWN bands (aFRR striped, mFRR solid). Each legend entry
+// hides or shows its part of the graph. Live follows now from the tracker's own readings; any
+// other window comes from Home Assistant (/api/graph: 10 s history up to 6 h, 5-minute or hourly
+// statistics beyond). Navigate with the presets, ◀ ▶, Go to, the 7-day overview strip, scrolling
+// or pinch (zoom), dragging (zoom to the selected range), Shift-drag, sideways scroll or a touch
+// drag (pan) and double-click (zoom out). Hover or arrow keys read values; the table view lists them.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 const POLL_MS = 10000;
@@ -63,7 +63,7 @@ const bandsFromPoints = (data) => {
   const bands = [];
   for (const p of data) {
     const last = bands[bands.length - 1];
-    if (p.signal && last && last.signal === p.signal && p.ms - last.endMs <= MIN) last.endMs = p.ms + 10000;
+    if (p.signal && last && last.signal === p.signal && last.market === p.market && p.ms - last.endMs <= MIN) last.endMs = p.ms + 10000;
     else if (p.signal) bands.push({ signal: p.signal, market: p.market, startMs: p.ms, endMs: p.ms + 10000 });
   }
   return bands;
@@ -71,6 +71,24 @@ const bandsFromPoints = (data) => {
 const bandsFromCommands = (commands) => (commands ?? []).map((c) => ({
   signal: c.signal, market: c.market, startMs: Date.parse(c.start), endMs: Date.parse(c.end),
 }));
+const bandShown = (hidden) => (b) => !hidden.has(b.signal) && !hidden.has(b.market);
+// aFRR bands are striped in their direction's color, mFRR bands solid (each svg has its own ids)
+function Hatches({ id }) {
+  return ['DOWN', 'UP'].map((s) => (
+    <pattern key={s} id={`${id}-${s}`} width={6} height={6} patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <rect width={6} height={6} className={`live-band-${s}`} />
+      <line x1={1.5} y1={0} x2={1.5} y2={6} className={`live-hatch live-hatch-${s}`} />
+    </pattern>
+  ));
+}
+const bandProps = (b, id) => (b.market === 'AFRR'
+  ? { className: 'live-band', fill: `url(#${id}-${b.signal})` }
+  : { className: `live-band live-band-${b.signal}` });
+// Which parts of the graph the legend has hidden (remembered per browser)
+const HIDDEN_KEY = 'graph-hidden';
+const loadHidden = () => {
+  try { return new Set(JSON.parse(localStorage.getItem(HIDDEN_KEY) ?? '[]')); } catch { return new Set(); }
+};
 const niceStep = (range) => {
   const raw = range / 5;
   const mag = 10 ** Math.floor(Math.log10(raw));
@@ -111,7 +129,7 @@ const useWidth = () => {
   return [ref, width];
 };
 
-function PowerChart({ data, bands, start, end, resolution, loading, onView }) {
+function PowerChart({ data, bands, hidden, start, end, resolution, loading, onView }) {
   const [wrapRef, width] = useWidth();
   const svgRef = useRef(null);
   const [hover, setHover] = useState(null);       // index into data
@@ -124,7 +142,11 @@ function PowerChart({ data, bands, start, end, resolution, loading, onView }) {
   const height = PAD.top + PLOT_H + PAD.bottom;
   const span = end - start;
   const visible = data.filter((p) => p.ms >= start - span * 0.05 && p.ms <= end + span * 0.05);
-  const values = visible.flatMap((d) => [d.grid_w, d.target]).filter((v) => v !== null && v !== undefined);
+  const showGrid = !hidden.has('grid');
+  const showTarget = !hidden.has('target');
+  // The y-axis fits what is shown
+  const values = visible.flatMap((d) => [showGrid ? d.grid_w : null, showTarget ? d.target : null])
+    .filter((v) => v !== null && v !== undefined);
   let lo = Math.min(0, ...values);
   let hi = Math.max(0, ...values);
   if (hi - lo < 1000) { hi += 500; lo -= 500; }
@@ -277,16 +299,23 @@ function PowerChart({ data, bands, start, end, resolution, loading, onView }) {
         onPointerLeave={() => { if (!gesture.current) setHover(null); }}
         onDoubleClick={(e) => zoomAround(timeAt(toPx(e.clientX)), 2)}
         onFocus={() => { if (data.length) setHover(nearestIndex(data, end)); }} onBlur={() => setHover(null)} onKeyDown={onKey}>
-        <defs><clipPath id="live-plot-clip"><rect x={PAD.left} y={0} width={plotW} height={PAD.top + PLOT_H} /></clipPath></defs>
+        <defs>
+          <clipPath id="live-plot-clip"><rect x={PAD.left} y={0} width={plotW} height={PAD.top + PLOT_H} /></clipPath>
+          <Hatches id="live-hatch" />
+        </defs>
         <g clipPath="url(#live-plot-clip)">
-          {bands.map((b) => {
+          {bands.filter(bandShown(hidden)).map((b) => {
             const x0 = Math.max(PAD.left, x(b.startMs));
             const x1 = Math.min(PAD.left + plotW, x(b.endMs));
             if (x1 <= PAD.left || x0 >= PAD.left + plotW) return null;
             return (
               <g key={`${b.signal}-${b.startMs}`}>
-                <rect x={x0} y={PAD.top} width={Math.max(1, x1 - x0)} height={PLOT_H} className={`live-band live-band-${b.signal}`} />
-                {x1 - x0 >= 34 && <text x={x0 + 4} y={PAD.top - 6} className="live-band-label">{b.signal}</text>}
+                <rect x={x0} y={PAD.top} width={Math.max(1, x1 - x0)} height={PLOT_H} {...bandProps(b, 'live-hatch')} />
+                {x1 - x0 >= 34 && (
+                  <text x={x0 + 4} y={PAD.top - 6} className="live-band-label">
+                    {x1 - x0 >= 84 && marketLabel(b.market) ? `${b.signal} · ${marketLabel(b.market)}` : b.signal}
+                  </text>
+                )}
               </g>
             );
           })}
@@ -301,8 +330,8 @@ function PowerChart({ data, bands, start, end, resolution, loading, onView }) {
           <text key={t} x={x(t)} y={PAD.top + PLOT_H + 18} textAnchor="middle" className="live-tick">{label}</text>
         ))}
         <g clipPath="url(#live-plot-clip)">
-          <path d={path('target')} className="live-line live-line-target" />
-          <path d={path('grid_w')} className="live-line live-line-grid" />
+          {showTarget && <path d={path('target')} className="live-line live-line-target" />}
+          {showGrid && <path d={path('grid_w')} className="live-line live-line-grid" />}
         </g>
         {selection && (
           <g>
@@ -313,8 +342,8 @@ function PowerChart({ data, bands, start, end, resolution, loading, onView }) {
         {h && (
           <g>
             <line x1={x(h.ms)} x2={x(h.ms)} y1={PAD.top} y2={PAD.top + PLOT_H} className="live-crosshair" />
-            {h.target !== null && <circle cx={x(h.ms)} cy={y(h.target)} r={4} className="live-dot live-dot-target" />}
-            {h.grid_w !== null && <circle cx={x(h.ms)} cy={y(h.grid_w)} r={4} className="live-dot live-dot-grid" />}
+            {showTarget && h.target !== null && <circle cx={x(h.ms)} cy={y(h.target)} r={4} className="live-dot live-dot-target" />}
+            {showGrid && h.grid_w !== null && <circle cx={x(h.ms)} cy={y(h.grid_w)} r={4} className="live-dot live-dot-grid" />}
           </g>
         )}
       </svg>
@@ -323,12 +352,12 @@ function PowerChart({ data, bands, start, end, resolution, loading, onView }) {
           <div className="muted small">
             {bucket ? `${stamp(h.ms - bucket / 2)}–${clock(h.ms + bucket / 2)} mean` : `${new Date(h.ms).toLocaleDateString('et-EE')} ${clock(h.ms, true)}`}
             {h.signal ? ` · ${h.signal} ${marketLabel(h.market) ?? ''}`
-              : hBands.length ? ` · ${hBands.map((b) => b.signal).join(', ')}` : ' · no command'}
+              : hBands.length ? ` · ${hBands.map((b) => `${b.signal} ${marketLabel(b.market) ?? ''}`.trim()).join(', ')}` : ' · no command'}
           </div>
-          <div className="live-tip-row"><span className="key key-grid" /><strong>{fmtW(h.grid_w)}</strong><span className="muted">grid</span></div>
+          {showGrid && <div className="live-tip-row"><span className="key key-grid" /><strong>{fmtW(h.grid_w)}</strong><span className="muted">grid</span></div>}
           {h.target !== null && (
             <>
-              <div className="live-tip-row"><span className="key key-target" /><strong>{fmtW(h.target)}</strong><span className="muted">target</span></div>
+              {showTarget && <div className="live-tip-row"><span className="key key-target" /><strong>{fmtW(h.target)}</strong><span className="muted">target</span></div>}
               <div className="live-tip-row"><span className="key" /><strong>{fmtW(h.delivered)}</strong><span className="muted">delivered of {fmtW(h.requested_w)}</span></div>
               <div className="live-tip-row"><span className="key" /><strong>{fmtW(h.baseline_w)}</strong><span className="muted">baseline</span></div>
             </>
@@ -379,9 +408,10 @@ function OverviewStrip({ data, bands, start, end, viewStart, viewEnd, onCenter }
           if (e.key === 'ArrowLeft') { e.preventDefault(); onCenter((viewStart + viewEnd) / 2 - stepMs); }
           if (e.key === 'ArrowRight') { e.preventDefault(); onCenter((viewStart + viewEnd) / 2 + stepMs); }
         }}>
+        <defs><Hatches id="overview-hatch" /></defs>
         {bands.map((b) => (
           <rect key={`${b.signal}-${b.startMs}`} x={x(b.startMs)} y={4} width={Math.max(1, x(b.endMs) - x(b.startMs))} height={height - 18}
-            className={`live-band live-band-${b.signal}`} />
+            {...bandProps(b, 'overview-hatch')} />
         ))}
         <path d={d} className="live-line live-overview-line" />
         {days.map((t) => (
@@ -407,7 +437,16 @@ export default function LiveView({ apiBase, focus }) {
   const [rangeError, setRangeError] = useState(null);
   const [overview, setOverview] = useState(null);
   const [goTo, setGoTo] = useState('');
+  const [hidden, setHidden] = useState(loadHidden);
   const request = useRef(0);
+  useEffect(() => {
+    try { localStorage.setItem(HIDDEN_KEY, JSON.stringify([...hidden])); } catch { /* storage unavailable */ }
+  }, [hidden]);
+  const toggle = (key) => setHidden((prev) => {
+    const next = new Set(prev);
+    if (!next.delete(key)) next.add(key);
+    return next;
+  });
 
   useEffect(() => {
     let stop = false;
@@ -519,6 +558,13 @@ export default function LiveView({ apiBase, focus }) {
   const pct = delivered !== null && live.requested_w ? Math.round((delivered / live.requested_w) * 100) : null;
   const atNow = view.live || (now !== null && end >= now - 1000);
   const overviewData = prepare(overview?.points ?? []);
+  // A legend entry is a button that hides or shows its part of the graph
+  const entry = (key, mark, label) => (
+    <button type="button" className="legend-toggle" aria-pressed={!hidden.has(key)} onClick={() => toggle(key)}
+      title={hidden.has(key) ? 'Show on the graph' : 'Hide from the graph'}>
+      {mark}{label}
+    </button>
+  );
   const overviewStart = overview ? Date.parse(overview.from) : null;
   const overviewEnd = overview ? Date.parse(overview.to) : null;
 
@@ -578,14 +624,16 @@ export default function LiveView({ apiBase, focus }) {
             <button type="submit" className="btn-link" disabled={!goTo}>Go to</button>
           </form>
         </div>
-        <div className="live-legend">
-          <span><span className="key key-grid" />Grid power (+ import / − export)</span>
-          {resolution === '10s' && <span><span className="key key-target" />Kratt target (baseline ± requested)</span>}
-          <span><span className="swatch live-band-DOWN" />DOWN</span>
-          <span><span className="swatch live-band-UP" />UP</span>
+        <div className="live-legend" role="group" aria-label="Show or hide on the graph">
+          {entry('grid', <span className="key key-grid" />, 'Grid power (+ import / − export)')}
+          {resolution === '10s' && entry('target', <span className="key key-target" />, 'Kratt target (baseline ± requested)')}
+          {entry('DOWN', <span className="swatch live-band-DOWN" />, 'DOWN')}
+          {entry('UP', <span className="swatch live-band-UP" />, 'UP')}
+          {entry('MFRR', <span className="swatch swatch-mfrr" />, 'mFRR')}
+          {entry('AFRR', <span className="swatch swatch-afrr" />, 'aFRR')}
         </div>
         {start !== null && (data.length || range || rangeError) ? (
-          <PowerChart data={data} bands={bands} start={start} end={end} resolution={resolution}
+          <PowerChart data={data} bands={bands} hidden={hidden} start={start} end={end} resolution={resolution}
             loading={loading && !liveFromMemory} onView={changeView} />
         ) : (
           <div className="muted small live-empty">{loading ? 'Loading…' : 'Collecting readings…'}</div>
@@ -599,7 +647,7 @@ export default function LiveView({ apiBase, focus }) {
           {rangeError && !liveFromMemory && <span className="err"> · {rangeError}</span>}
         </div>
         {overview && overviewStart !== null && start !== null && (
-          <OverviewStrip data={overviewData} bands={bandsFromCommands(overview.commands)} start={overviewStart} end={overviewEnd}
+          <OverviewStrip data={overviewData} bands={bandsFromCommands(overview.commands).filter(bandShown(hidden))} start={overviewStart} end={overviewEnd}
             viewStart={start} viewEnd={end} onCenter={(t) => changeView(t - span / 2, t + span / 2)} />
         )}
         <div className="muted small">Scroll to zoom · drag to select a range and zoom in · Shift-drag or scroll sideways to move · double-click to zoom out</div>
