@@ -6,7 +6,7 @@ The add-on talks to Home Assistant through the Supervisor, so you don't need a l
 
 ## Kratt right now
 
-The top of the page shows the current Kratt command: UP or DOWN, mFRR or aFRR, since when, the power Kratt requested, the power delivered (grid power against the baseline) and the grid power. The graph next to it shows any period:
+The top of the page shows the current Kratt command: UP or DOWN, mFRR or aFRR, since when, the power Kratt requested, the power delivered (grid power against the baseline) and the grid power. The graph next to it shows the page's period:
 
 - **Grid power** (blue): the summed phases, + import / − export.
 - **Kratt target** (orange, dashed): the baseline plus the requested power in the commanded direction. The closer the grid follows it, the closer the delivery is to 100 %.
@@ -14,12 +14,14 @@ The top of the page shows the current Kratt command: UP or DOWN, mFRR or aFRR, s
 
 Click an entry in the legend to hide or show it on the graph; the choice is remembered in this browser.
 
+The graph and the period at the top of the page (Today, Yesterday, … Custom) are one window. Picking a period shows it in the graph, live from its start while it reaches now; **All** and periods over 31 days show their last 31 days. Moving the graph sets the period to **Custom** with the graph's window as soon as the move settles, so the figures and tables below always cover what the graph shows. **From** and **To** under the period buttons show the window; edit them to set it, an empty **To** means until now. The address bar keeps the period, so a reload or a shared link opens the same window.
+
 Moving around:
 
 - **Presets** (15 min to 7 days), **◀ ▶** to step a window back or forward, and **Live** to follow now.
-- **Go to** a date and time, or click or drag in the **7-day strip** below the graph.
+- **Go to** a date and time, or click or drag in the **strip** below the graph (the last 7 days, or back to where the graph starts).
 - **Scroll** over the graph (or pinch) to zoom, **drag** across it to select a range and zoom into it (Esc cancels), **Shift-drag** or scroll sideways to move it (on a touch screen, drag with one finger), **double-click** to zoom out. With the graph focused: **+** / **−** zoom, the arrow keys read values.
-- **Show in graph** (the chart icon) on an activation opens the graph around it.
+- **Show in graph** (the chart icon) on an activation opens the graph around it without changing the period; **← Back to …** under the graph returns to the period.
 
 Hover over the graph to read the values at a moment; **Table view** lists them.
 
@@ -27,7 +29,7 @@ Everything comes from Home Assistant; the add-on stores no readings of its own. 
 
 ### Price status
 
-The chips above it show the price sources, all in the same way: when each was last checked, when it's checked next and how many slots wait for it.
+The lines above it show the price sources, one per line and all in the same way: when each was last checked, when it's checked next and how many slots wait for it.
 
 | Chip | Source | Waits for |
 |---|---|---|
