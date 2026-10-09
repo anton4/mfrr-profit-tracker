@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.6.2
+
+- aFRR commands are striped on the graph, mFRR commands solid, in the same red (DOWN) and green (UP). Wide bands say which, e.g. "UP · aFRR", and so does the tooltip.
+- Click an entry in the graph's legend to hide or show it: grid power, Kratt's target, DOWN, UP, mFRR or aFRR. The axis fits what's shown, and the choice is remembered in the browser.
+
 ## 1.6.1
 
 - The graph zooms with the scroll wheel, no Ctrl/⌘ needed. Dragging across it selects a range and zooms into it on release, with the selected times shown while you drag (Esc cancels). To move the graph, Shift-drag or scroll sideways; on a touch screen, drag with one finger.
