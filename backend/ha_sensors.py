@@ -64,6 +64,14 @@ def build_states(db: Database, now: datetime | None = None) -> dict[str, tuple]:
             **_EUR, "state_class": "total", "friendly_name": "mFRR net result (total)", **total}),
         f"sensor.{PREFIX}_energy_total": (total["energy_kwh"], {
             **_KWH, "state_class": "total", "friendly_name": "mFRR delivered energy (total)"}),
+        # Energy dashboard: a grid "return" with the 0 kWh helper as energy and the payout as
+        # "entity tracking the total compensation". Only the payout, because the bill effect of
+        # activations is already metered and priced by the dashboard itself.
+        f"sensor.{PREFIX}_activation_income_total": (
+            round(sum(r.get("profit") or 0.0 for r in rows if r.get("net_total") is not None), 4), {
+                **_EUR, "state_class": "total", "friendly_name": "mFRR activation payout (total)"}),
+        f"sensor.{PREFIX}_energy_dashboard_zero": (0, {
+            **_KWH, "state_class": "total_increasing", "friendly_name": "mFRR Energy dashboard helper (0 kWh)"}),
         f"sensor.{PREFIX}_net_today": (today["net"], {
             **_EUR, "friendly_name": "mFRR net result today", **today}),
         f"sensor.{PREFIX}_net_month": (month["net"], {
