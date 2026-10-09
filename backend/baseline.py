@@ -4,20 +4,18 @@
 # It is taken from the idle readings just before the signal and stays locked for the whole run.
 from collections import deque
 from datetime import datetime
-import pytz
 from sqlite_utils import Database
 
 import config
 
 DB_PATH = config.DB_PATH
-tz = pytz.timezone("Europe/Tallinn")
 
 # Idle readings averaged into the snapshot (smooths sensor noise; ~6 reads at 10 s)
 BASELINE_WINDOW_S = 60
 
 
 def dlog(msg: str):
-    print(f"[baseline] {datetime.now(tz).isoformat()}  {msg}")
+    print(f"[baseline] {msg}")
 
 
 def _ensure_schema():
