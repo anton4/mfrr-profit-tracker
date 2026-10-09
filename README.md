@@ -246,6 +246,8 @@ How to run it:
 
 -   backend/ha_sensors.py: Publishes the summary sensors to Home Assistant.
 
+-   backend/ha_statistics.py: Writes the hourly payout statistics for the Energy dashboard (official Qilowatt figures where a report is imported).
+
 -   mfrr_tracker/, repository.yaml: Home Assistant add-on definition and add-on repository.
 
 -   backend/api.py: FastAPI app. Serves `/api/mffr`, `/api/price-sync`, `/api/backfill` and the built UI, and starts all schedulers.

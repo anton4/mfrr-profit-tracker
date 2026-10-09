@@ -158,9 +158,13 @@ async def import_qw_report(request: Request):
     if not content:
         raise HTTPException(400, "Send the CSV file as the request body")
     try:
-        return qw_report.import_report(content)
+        result = qw_report.import_report(content)
     except (ValueError, KeyError) as e:
         raise HTTPException(400, f"Could not import report: {e}")
+    if result["type"] == "revenue" and main.scheduler.running:
+        # Official figures replace the estimate in the Energy dashboard statistics right away
+        main.scheduler.get_job("payout_statistics").modify(next_run_time=datetime.now(LOCAL_TZ))
+    return result
 
 @app.get("/api/qw-report")
 def get_qw_report(

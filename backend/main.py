@@ -10,6 +10,7 @@ from ha import (SENSOR_NORDPOOL, GridMeter, classify_market, deviation_direction
                 get_requested_w, get_signal, get_source_changed)
 from baseline import SignalBaseline
 import ha_sensors
+import ha_statistics
 import config
 
 DB_PATH = config.DB_PATH
@@ -336,3 +337,5 @@ scheduler = BackgroundScheduler()
 scheduler.add_job(write_current_timeslot, 'interval', seconds=10, max_instances=1, coalesce=True)
 scheduler.add_job(cleanup_zero_min_rows, 'interval', minutes=1, max_instances=1, coalesce=True)
 scheduler.add_job(ha_sensors.publish_sensors, 'interval', minutes=1, max_instances=1, coalesce=True)
+scheduler.add_job(ha_statistics.push_statistics, 'interval', minutes=5, id='payout_statistics',
+                  max_instances=1, coalesce=True)
