@@ -9,7 +9,7 @@ The add-on talks to Home Assistant through the Supervisor, so you don't need a l
 All settings are add-on options; there is no second place. Edit them in either of two ways:
 
 - Home Assistant: the add-on's **Configuration** tab, as a form or with ⋮ → **Edit in YAML**. Restart the add-on afterwards.
-- The tracker's own UI: **Data tools → Configuration** shows the same options as YAML, with a search to insert a sensor ID at the cursor. **Save & restart** stores them through the Supervisor, restarts the add-on and reloads the page when it's back. It only works when the tracker is opened from the Home Assistant sidebar, not through the direct port.
+- The tracker's own UI: **Data tools → Configuration** shows the same options as a form, with a field for every option (also the optional ones not set yet), or as YAML. Sensor fields search your Home Assistant sensors and show their current value. **Save & restart** stores the options through the Supervisor, restarts the add-on and reloads the page when it's back. It only works when the tracker is opened from the Home Assistant sidebar, not through the direct port.
 
 | Option | Description |
 |---|---|
@@ -29,7 +29,7 @@ All settings are add-on options; there is no second place. Edit them in either o
 
 ### Sensor IDs
 
-Home Assistant has no entity picker for add-on options, so the sensor options are entity IDs as text. In the `sensor_grid_power` list in the Configuration tab, type the full ID and choose **Add custom item**. In the tracker's **Data tools → Configuration**, search for the sensor and insert it. Shelly entity IDs usually contain the device ID, e.g. `sensor.shellyem3_485519dbeee9_channel_a_power`; the defaults are only examples.
+Home Assistant has no entity picker for add-on options, so the sensor options are entity IDs as text. In the `sensor_grid_power` list in the Configuration tab, type the full ID and choose **Add custom item**. In the tracker's **Data tools → Configuration**, start typing in a sensor field to search your sensors. Shelly entity IDs usually contain the device ID, e.g. `sensor.shellyem3_485519dbeee9_channel_a_power`; the defaults are only examples.
 
 On start, the add-on log shows the sensors in use and any that Home Assistant doesn't have, together with the power sensors it does have. The UI shows a warning that opens the Configuration section.
 

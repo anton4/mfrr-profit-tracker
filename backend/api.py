@@ -141,32 +141,63 @@ def get_sensor_status():
 def _through_ingress(request: Request) -> bool:
     return request.client is not None and request.client.host == addon_config.INGRESS_IP
 
+def _config_access(request: Request) -> str | None:
+    """Why the configuration can't be edited from this request, or None."""
+    if not addon_config.available():
+        return "Standalone install: the configuration is in .env. Restart the container after changing it."
+    if not _through_ingress(request):
+        return "Open the tracker from the Home Assistant sidebar to see and edit its configuration."
+    return None
+
 @app.get("/api/config")
 def get_config(request: Request):
-    """The add-on options as YAML for the Configuration editor (passwords masked)."""
-    if not addon_config.available():
-        return {"editable": False, "yaml": None,
-                "message": "Standalone install: the configuration is in .env. Restart the container after changing it."}
-    if not _through_ingress(request):
-        return {"editable": False, "yaml": None,
-                "message": "Open the tracker from the Home Assistant sidebar to see and edit its configuration."}
+    """The add-on options (passwords masked) with the form fields and network packages."""
+    if message := _config_access(request):
+        return {"editable": False, "message": message}
     try:
-        return {"editable": True, "yaml": addon_config.to_yaml(addon_config.get_options()), "message": None}
+        options = addon_config.masked(addon_config.get_options())
     except (ValueError, requests.RequestException) as e:
         raise HTTPException(502, f"Can't read the add-on configuration: {e}")
+    return {
+        "editable": True, "message": None,
+        "options": options, "yaml": addon_config.to_yaml(options),
+        "fields": addon_config.fields(), "mask": addon_config.MASK,
+        # What an empty optional option means, shown as placeholders
+        "defaults": {**{f"fee_{k}": v for k, (_, v) in fees.FIELDS.items()},
+                     "mfrr_price_recheck_min": mffr_price_updater.DEFAULT_RECHECK_MIN,
+                     "entsoe_cbmp_area": entsoe_cbmp.DEFAULT_AREA},
+        # Võrk packages bring their own network rates (fee_elektrilevi_* only apply to custom)
+        "packages": fees.PACKAGES, "network_options": [f"fee_{k}" for k in fees.NETWORK_KEYS],
+    }
+
+@app.post("/api/config/convert")
+def convert_config(request: Request, payload: dict = Body(...)):
+    """Switch the editor between form and YAML: {"options": …} → {"yaml": …} and back."""
+    if message := _config_access(request):
+        raise HTTPException(403, message)
+    if "yaml" in payload:
+        try:
+            return {"options": addon_config.parse_yaml(str(payload["yaml"] or ""))}
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+    return {"yaml": addon_config.to_yaml(payload.get("options") or {})}
 
 # POST rather than PUT: reverse proxies in front of Home Assistant often allow only GET and POST
 @app.post("/api/config")
 def save_config(request: Request, payload: dict = Body(...)):
-    """Store the add-on options and restart the add-on to apply them."""
-    if not addon_config.available() or not _through_ingress(request):
-        raise HTTPException(403, "The configuration can only be changed from the Home Assistant sidebar")
+    """Store the add-on options ({"options": …} from the form or {"yaml": …}) and restart."""
+    if message := _config_access(request):
+        raise HTTPException(403, message)
     try:
         current = addon_config.get_options()
     except (ValueError, requests.RequestException) as e:
         raise HTTPException(502, f"Can't read the add-on configuration: {e}")
     try:
-        addon_config.save_options(addon_config.from_yaml(str(payload.get("yaml") or ""), current))
+        options = (addon_config.parse_yaml(str(payload["yaml"] or "")) if "yaml" in payload
+                   else payload.get("options"))
+        if not isinstance(options, dict):
+            raise ValueError("No options to save")
+        addon_config.save_options(addon_config.unmask(options, current))
     except ValueError as e:
         raise HTTPException(400, str(e))
     except requests.RequestException as e:

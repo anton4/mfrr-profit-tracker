@@ -27,6 +27,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY backend/ .
 COPY --from=ui /ui/dist ./static
+# The add-on's options schema and translations, for the Configuration form in the UI
+COPY mfrr_tracker/config.yaml ./addon/config.yaml
+COPY mfrr_tracker/translations/ ./addon/translations/
 RUN mkdir -p data logs
 
 # Version shown in the log: passed by the image workflow, and by the Supervisor for a local build.
