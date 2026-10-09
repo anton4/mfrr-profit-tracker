@@ -12,7 +12,8 @@ import pytz
 from sqlite_utils import Database
 
 import mffr_price_updater
-from main import AFRR_PRICE_DOWN, AFRR_PRICE_UP, DB_PATH
+import price_settings
+from main import DB_PATH
 
 tz = pytz.timezone("Europe/Tallinn")
 
@@ -125,7 +126,8 @@ def _correct_markets(db: Database, signals: list[dict]) -> int:
         for row in db["slots"].rows_where("timeslot = ? AND market IS NOT NULL AND market != ?", [slot, market]):
             update = {"market": market, "profit": None, "net_total": None}
             if market == "AFRR":
-                update.update(mffr_price=AFRR_PRICE_UP if row["signal"] == "UP" else AFRR_PRICE_DOWN,
+                prices = price_settings.at(row["timeslot"])
+                update.update(mffr_price=prices["afrr_price_up" if row["signal"] == "UP" else "afrr_price_down"],
                               price_source="estimate", price_timeslot=row["timeslot"])
             else:
                 update.update(mffr_price=None, price_source=None)   # BTD sync fills it

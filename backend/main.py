@@ -1,5 +1,4 @@
 # main.py
-import os
 import threading
 from collections import deque
 from datetime import datetime, timedelta, timezone
@@ -15,6 +14,7 @@ from history import HistoryStates, current_units, fetch_history
 import ha_sensors
 import ha_statistics
 import config
+import price_settings
 import sensors
 
 DB_PATH = config.DB_PATH
@@ -23,11 +23,10 @@ SLOT = timedelta(minutes=15)
 TICK = timedelta(seconds=10)
 LIVE_WINDOW = timedelta(hours=2)   # ticks kept for the live view
 
-# aFRR energy prices aren't published reliably yet: estimate (€/MWh) until Volton or a
-# Qilowatt report gives the real figure. Defaults are the rates implied by Kratt reports
-# (UP revenue ≈ 440 €/MWh, DOWN ≈ 530 €/MWh paid for absorbing → price −530).
-AFRR_PRICE_UP = float(os.getenv("AFRR_PRICE_UP_EUR_MWH", "440"))
-AFRR_PRICE_DOWN = float(os.getenv("AFRR_PRICE_DOWN_EUR_MWH", "-530"))
+# aFRR energy prices aren't published reliably yet: new rows get the current estimate (€/MWh)
+# until Volton or a Qilowatt report gives the real figure
+AFRR_PRICE_UP = price_settings.CURRENT["afrr_price_up"]
+AFRR_PRICE_DOWN = price_settings.CURRENT["afrr_price_down"]
 
 # --- DB schema bootstrap ---
 init_db = Database(DB_PATH)

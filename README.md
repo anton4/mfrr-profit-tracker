@@ -179,7 +179,7 @@ Set the fees with the `FEE_*` variables below (the `fee_*` options in the add-on
 
 Peak rates apply November–March: the day peak on working days 09–12 and 16–20, the weekend peak on weekends and holidays 16–20. A custom package uses peak hours only if you set peak prices. Monthly network fees are fixed costs and aren't included. `FEE_NETWORK_PACKAGE` (`vork1`, `vork2`, `vork4`, `vork5` or `custom`) sets the package.
 
-The defaults can be changed with `FEE_MARGIN`, `FEE_TAASTUV`, `FEE_AKTSIIS`, `FEE_TASAKAAL`, `FEE_VARUSTUS`, `FEE_VAT`, `FEE_EXPORT_MARGIN` and `FEE_EXPORT_TASAKAAL`, and for a custom package `FEE_ELEKTRILEVI_DAY`, `FEE_ELEKTRILEVI_NIGHT`, `FEE_ELEKTRILEVI_DAY_PEAK` and `FEE_ELEKTRILEVI_HOLIDAY_PEAK`. One set of values applies to all history; rate changes over time aren't modelled. 
+The defaults can be changed with `FEE_MARGIN`, `FEE_TAASTUV`, `FEE_AKTSIIS`, `FEE_TASAKAAL`, `FEE_VARUSTUS`, `FEE_VAT`, `FEE_EXPORT_MARGIN` and `FEE_EXPORT_TASAKAAL`, and for a custom package `FEE_ELEKTRILEVI_DAY`, `FEE_ELEKTRILEVI_NIGHT`, `FEE_ELEKTRILEVI_DAY_PEAK` and `FEE_ELEKTRILEVI_HOLIDAY_PEAK`. Each change of the fees, the Kratt share or the aFRR estimates applies from the next start on; past activations keep the values they were calculated with. To apply a change to all history, save it in the add-on's **Data tools → Configuration** with **All history**. 
 
 The `?fees=on|off` and `?range=this_month` URL parameters open the dashboard with that setting.
 
