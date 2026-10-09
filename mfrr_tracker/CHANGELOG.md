@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.6.1
+
+- The graph zooms with the scroll wheel, no Ctrl/⌘ needed. Dragging across it selects a range and zooms into it on release, with the selected times shown while you drag (Esc cancels). To move the graph, Shift-drag or scroll sideways; on a touch screen, drag with one finger.
+
 ## 1.6.0
 
 - The graph shows any period, not only the last two hours: presets from 15 minutes to 7 days, ◀ ▶ to step back and forward, Live to follow now, Go to a date and time, and a 7-day strip to click or drag through. Drag to move, Shift-drag to zoom into a range, Ctrl/⌘ + scroll or pinch to zoom, double-click to zoom out.
