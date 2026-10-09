@@ -313,6 +313,14 @@ button { font: inherit; }
   .switch { padding: 0 10px; }
 }
 
+/* ---------- sensors ---------- */
+.chip-btn { font: inherit; cursor: pointer; text-align: left; }
+.sensor-phase { display: flex; flex-direction: column; gap: 6px; }
+.sensor-row { display: flex; align-items: center; gap: 8px; }
+.sensor-row input { flex: 1; min-width: 0; }
+.sensor-row .iconbtn:disabled { opacity: 0.4; cursor: default; }
+.sensor-add { align-self: flex-start; height: 32px; padding: 0; }
+
 .seg-sm { align-self: flex-start; }
 .seg-sm button { padding: 6px 10px; min-height: 32px; font-size: 13px; }
 .field input:disabled { background: var(--surface-2); color: var(--muted); opacity: 1; }

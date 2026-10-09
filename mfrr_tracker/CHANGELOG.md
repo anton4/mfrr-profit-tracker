@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.0
+
+- Pick the sensors in the tracker's UI under **Data tools → Sensors**. It lists your Home Assistant sensors with their current values and shows the summed grid power. Sensors saved there override the add-on options. The add-on options can't list entities, because Home Assistant has no entity picker for add-ons.
+- On start, the add-on logs the sensors in use and any that Home Assistant doesn't have, together with the power sensors it does have. A sensor that can't be read is logged once, and again when it recovers, instead of every 10 seconds. A warning in the UI links to the Sensors section.
+- Every log line starts with the date and time.
+
 ## 1.2.0
 
 - Write the activation payout to Home Assistant as hourly statistics (`mfrr_tracker:activation_payout`, with `mfrr_tracker:energy_zero` for the Energy dashboard). Later corrections, such as published prices, backfills and imported Qilowatt revenue reports, now rewrite the hours they belong to instead of landing in the current hour.

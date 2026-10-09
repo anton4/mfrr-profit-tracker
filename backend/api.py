@@ -17,10 +17,13 @@ import backfill
 import qw_report
 import fees
 import config
+import ha
+import sensors
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("✅ Starting all schedulers from FastAPI")
+    ha.log_sensor_check()
     main.write_current_timeslot()
     profit_calc.run_profit_calculation()
     mffr_price_updater.fetch_and_update_mffr_prices()
@@ -126,6 +129,57 @@ def put_fee_settings(payload: dict = Body(...)):
         return {"values": fees.save_fees(payload)}
     except ValueError as e:
         raise HTTPException(400, str(e))
+
+def _sensor_settings(states: list[dict] | None = None) -> dict:
+    """Sensors in use, their problems, and the HA sensors to pick from."""
+    states = states if states is not None else ha.get_states()
+    values, saved = sensors.load()
+    entities = sorted(
+        ({
+            "entity_id": st["entity_id"],
+            "name": st.get("attributes", {}).get("friendly_name"),
+            "state": st.get("state"),
+            "unit": st.get("attributes", {}).get("unit_of_measurement"),
+            "power": ha.is_power_sensor(st),
+            "price": "raw_today" in st.get("attributes", {}),   # what main reads from Nord Pool
+        } for st in states or [] if st["entity_id"].startswith("sensor.")),
+        key=lambda e: e["entity_id"],
+    )
+    return {
+        "values": values,
+        "defaults": sensors.DEFAULTS,
+        "saved": saved,
+        "labels": {k: label for k, (label, _, _) in sensors.FIELDS.items()},
+        "kinds": {k: kind for k, (_, _, kind) in sensors.FIELDS.items()},
+        "optional": sorted(sensors.OPTIONAL),
+        "lists": sorted(sensors.LISTS),
+        "problems": sensors.problems({st["entity_id"] for st in states}, values) if states is not None else [],
+        "entities": entities,
+        "ha_error": None if states is not None else "Can't reach Home Assistant",
+    }
+
+@app.get("/api/sensors")
+def get_sensor_settings():
+    """Home Assistant entities the tracker reads; picked in the UI or from the add-on options."""
+    return _sensor_settings()
+
+@app.put("/api/sensors")
+def put_sensor_settings(payload: dict = Body(...)):
+    states = ha.get_states()
+    if states is None:
+        raise HTTPException(502, "Can't reach Home Assistant to check the sensors")
+    try:
+        sensors.save(payload, {st["entity_id"] for st in states})
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    print(f"🔌 Sensors picked in the UI: {sensors.describe()}")
+    return _sensor_settings(states)
+
+@app.delete("/api/sensors")
+def reset_sensor_settings():
+    sensors.reset()
+    print(f"🔌 Sensors reset to the add-on options: {sensors.describe()}")
+    return _sensor_settings()
 
 @app.get("/api/price-sync")
 def get_price_sync():

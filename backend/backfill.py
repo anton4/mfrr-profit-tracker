@@ -14,7 +14,7 @@ from sqlite_utils import Database
 import mffr_price_updater
 import entsoe_cbmp
 import profit_calc
-from ha import SENSOR_GRID_POWER, SENSOR_MODE, SENSOR_POWERLIMIT, SENSOR_SOURCE
+import sensors
 from history import HistoryStates, current_units, fetch_history
 from main import DB_PATH, Tracker
 
@@ -66,15 +66,19 @@ def run_backfill(start: datetime, end: datetime, progress=lambda phase, pct: Non
     if start >= end:
         raise ValueError("Empty range: 'to' must be after 'from' and before the current slot")
 
-    entities = [SENSOR_SOURCE, SENSOR_MODE, *SENSOR_GRID_POWER]
-    if SENSOR_POWERLIMIT:
-        entities.append(SENSOR_POWERLIMIT)
+    sensor = sensors.current()
+    grid_power = sensor["grid_power"]
+    if not sensor["source"] or not sensor["mode"] or not grid_power:
+        raise ValueError("Pick the Qilowatt and grid power sensors under Data tools → Sensors first")
+    entities = [sensor["source"], sensor["mode"], *grid_power]
+    if sensor["powerlimit"]:
+        entities.append(sensor["powerlimit"])
 
     # 1) HA history (warm-up included)
     progress("fetching", 0)
     warm_start = start - WARMUP
     changes = fetch_history(entities, warm_start, end, lambda f: progress("fetching", 30 * f))
-    if not changes.get(SENSOR_SOURCE) or not all(changes.get(e) for e in SENSOR_GRID_POWER):
+    if not changes.get(sensor["source"]) or not all(changes.get(e) for e in grid_power):
         raise RuntimeError("No Home Assistant history for this range. The recorder keeps "
                            "purge_keep_days of history (10 days by default).")
     states = HistoryStates(changes, current_units(entities))

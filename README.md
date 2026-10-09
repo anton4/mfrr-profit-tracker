@@ -72,6 +72,8 @@ KRATT_SHARE=0.20
 
 -   SENSOR_NORDPOOL: Nordpool integration sensor (no VAT/tariffs), price in €/kWh.
 
+-   The sensors can also be picked in the UI under **Data tools → Sensors**, which lists your Home Assistant sensors with their current values. Sensors saved there override the `SENSOR_*` variables; **Use the add-on options** goes back to them. On start, the tracker logs any configured sensor that Home Assistant doesn't have.
+
 -   KRATT_SHARE: Share of activation revenue kept by Kratt (default 0.20 = 20%).
 
 -   PUBLISH_SENSORS (optional): `true` publishes the summary sensors to Home Assistant, as the add-on does (see [mfrr_tracker/DOCS.md](mfrr_tracker/DOCS.md)). Off by default in standalone mode.

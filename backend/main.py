@@ -6,12 +6,13 @@ import pytz
 from sqlite_utils import Database
 from sqlite_utils.db import NotFoundError
 
-from ha import (SENSOR_NORDPOOL, GridMeter, classify_market, deviation_direction, get_entity,
-                get_requested_w, get_signal, get_source_changed)
+from ha import (GridMeter, classify_market, deviation_direction, get_entity, get_requested_w,
+                get_signal, get_source_changed)
 from baseline import SignalBaseline
 import ha_sensors
 import ha_statistics
 import config
+import sensors
 
 DB_PATH = config.DB_PATH
 tz = pytz.timezone("Europe/Tallinn")
@@ -318,7 +319,7 @@ class Tracker:
     def _nordpool_price(self, slot_start: datetime) -> float | None:
         """Nord Pool price (€/kWh) for a slot from the HA Nord Pool sensor's attributes."""
         try:
-            attrs = (get_entity(SENSOR_NORDPOOL) or {}).get("attributes", {})
+            attrs = (get_entity(sensors.current()["nordpool"]) or {}).get("attributes", {})
             for p in (attrs.get("raw_today", []) or []) + (attrs.get("raw_tomorrow", []) or []):
                 if datetime.fromisoformat(p["start"]) <= slot_start < datetime.fromisoformat(p["end"]):
                     return round(p["value"], 5)
