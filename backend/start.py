@@ -86,6 +86,7 @@ def load_addon_options(path: str = OPTIONS_FILE) -> None:
 
 if __name__ == "__main__":
     timestamp_output()
+    print(f"🚀 mFRR Profit Tracker {os.getenv('TRACKER_VERSION', 'dev')}")
     if os.path.isfile(OPTIONS_FILE):
         load_addon_options()
     # In-process, so uvicorn's log handlers write to the timestamped stderr

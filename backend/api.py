@@ -17,6 +17,7 @@ import backfill
 import qw_report
 import fees
 import config
+import entsoe_cbmp
 import ha
 import sensors
 
@@ -24,6 +25,8 @@ import sensors
 async def lifespan(app: FastAPI):
     print("✅ Starting all schedulers from FastAPI")
     ha.log_sensor_check()
+    print("💶 aFRR market price (CBMP): "
+          + ("ENTSO-E token set" if entsoe_cbmp.configured() else "ENTSO-E token not set, not shown"))
     main.write_current_timeslot()
     profit_calc.run_profit_calculation()
     mffr_price_updater.fetch_and_update_mffr_prices()

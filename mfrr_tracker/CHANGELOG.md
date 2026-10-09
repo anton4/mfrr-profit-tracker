@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.3.1
+
+- The UI shows the new version right after an add-on update. Before, the browser could keep using the cached page from the previous version for a while.
+- The log shows the add-on version on start, and whether an ENTSO-E token is set.
+
 ## 1.3.0
 
 - Pick the sensors in the tracker's UI under **Data tools → Sensors**. It lists your Home Assistant sensors with their current values and shows the summed grid power. Sensors saved there override the add-on options. The add-on options can't list entities, because Home Assistant has no entity picker for add-ons.
