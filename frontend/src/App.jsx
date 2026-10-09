@@ -1,6 +1,7 @@
 // frontend/src/App.jsx
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import ConfigPanel from './ConfigPanel';
+import LiveView from './LiveView';
 import './App.css';
 
 // Relative, so the UI also works under a path prefix (Home Assistant Ingress); vite dev proxies /api
@@ -693,6 +694,8 @@ function App() {
             )}
           </div>
         )}
+
+        <LiveView apiBase={API_BASE} />
 
         <div className="kpis">
           <div className="card kpi">

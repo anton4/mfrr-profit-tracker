@@ -147,6 +147,7 @@ class GridMeter:
 
     def __init__(self):
         self._prev = None   # (power_w, datetime)
+        self.power_w = None  # latest net grid power (W), None when the last read failed
 
     def _steady(self, a: float, b: float) -> bool:
         tolerance = max(self.BRIDGE_TOLERANCE_W, max(abs(a), abs(b)) * self.BRIDGE_TOLERANCE_PCT / 100.0)
@@ -159,7 +160,7 @@ class GridMeter:
         slots' energy into the current one. Returns None on the first read, a failed read,
         or a long gap across which the power changed.
         """
-        power_w = get_grid_power_w(fetch)
+        power_w = self.power_w = get_grid_power_w(fetch)
         if power_w is None:
             return None   # keep the last good reading for bridging
         prev, self._prev = self._prev, (power_w, now)
