@@ -18,6 +18,7 @@ import mffr_price_updater
 import backfill
 import qw_report
 import fees
+import graph
 import addon_config
 import price_settings
 import config
@@ -216,6 +217,27 @@ def save_config(request: Request, payload: dict = Body(...)):
 def get_live():
     """Current Kratt command (direction, market, requested power) and the last two hours of ticks."""
     return main.live_status()
+
+def _parse_time(value: str) -> datetime:
+    dt = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    return dt if dt.tzinfo else LOCAL_TZ.localize(dt)
+
+@app.get("/api/graph")
+def get_graph(from_ts: str = Query(..., alias="from"), to_ts: str = Query(..., alias="to")):
+    """Grid power and Kratt commands for any window, from Home Assistant's history and statistics."""
+    try:
+        start, end = _parse_time(from_ts), _parse_time(to_ts)
+    except ValueError:
+        raise HTTPException(400, "from and to must be ISO date-times")
+    end = min(end, datetime.now(LOCAL_TZ))
+    if start >= end:
+        raise HTTPException(400, "'from' must be before 'to' and in the past")
+    if end - start > graph.MAX_SPAN:
+        raise HTTPException(400, f"The window can be at most {graph.MAX_SPAN.days} days")
+    try:
+        return graph.window(start, end)
+    except Exception as e:
+        raise HTTPException(502, f"Can't read Home Assistant history: {e}")
 
 @app.get("/api/version")
 def get_version():

@@ -7,7 +7,7 @@ import pytz
 from sqlite_utils import Database
 from sqlite_utils.db import NotFoundError
 
-from ha import (GridMeter, classify_market, deviation_direction, get_entity, get_requested_w,
+from ha import (PROVIDER, GridMeter, classify_market, deviation_direction, get_entity, get_requested_w,
                 get_signal, get_source_changed)
 from baseline import SignalBaseline
 from history import HistoryStates, current_units, fetch_history
@@ -134,10 +134,10 @@ class Tracker:
     commanded direction.
     """
 
-    def __init__(self, store_baseline: bool = True, keep_points: bool = False):
+    def __init__(self, store_baseline: bool = True, keep_points: bool = False, max_points: int | None = None):
         self.meter = GridMeter()
-        # Last LIVE_WINDOW of ticks for the live view (live tracker only)
-        self.points = deque(maxlen=int(LIVE_WINDOW / TICK) + 60) if keep_points else None
+        # Ticks for the live view and the graph (the most recent max_points; None = all)
+        self.points = deque(maxlen=max_points) if keep_points else None
         self._points_lock = threading.Lock()
         self.baseline = SignalBaseline(store=store_baseline)
         self.last_logged_signal = None
@@ -357,33 +357,54 @@ class Tracker:
         return None
 
 
-live_tracker = Tracker(keep_points=True)
+live_tracker = Tracker(keep_points=True, max_points=int(LIVE_WINDOW / TICK) + 60)
 
 def write_current_timeslot():
     live_tracker.tick(datetime.now(tz).replace(microsecond=0))
 
 
-def seed_live_points():
-    """After a start, fill the live view's last two hours by replaying Home Assistant history
-    through the same tick logic (nothing is written)."""
+def warm_start_for(start: datetime) -> datetime:
+    """Where a replay must begin to show `start` correctly: a few minutes earlier for the meter
+    and the baseline, or before the start of a Kratt run already active at `start`."""
+    source = sensors.current()["source"]
+    warm_start = start - timedelta(minutes=5)
+    for back in (timedelta(hours=2), timedelta(hours=12), timedelta(days=2)):
+        changes = fetch_history([source], start - back, start).get(source) or []
+        idle = [t for t, state in changes if (state or "").strip().lower() != PROVIDER]
+        if idle:   # the run (if any) began at the first Kratt state after the last idle one
+            run = [t for t, state in changes if t > idle[-1]]
+            return min(warm_start, (run[0] if run else start) - timedelta(minutes=5))
+        warm_start = start - back
+    return warm_start
+
+
+def replay_history(start: datetime, end: datetime, warm_start: datetime | None = None) -> "Tracker":
+    """Replay Home Assistant history through the tick logic (nothing is written). The returned
+    tracker's points cover [warm_start, end]; raises if the history can't be read."""
     sensor = sensors.current()
     entities = [e for e in (sensor["source"], sensor["mode"], sensor["powerlimit"], *sensor["grid_power"]) if e]
-    end = datetime.now(timezone.utc)
-    warm_start = end - LIVE_WINDOW - timedelta(minutes=5)   # primes the meter and the baseline
-    try:
-        changes = fetch_history(entities, warm_start, end)
-    except Exception as e:
-        print(f"⚠️ Live view starts empty: no Home Assistant history ({e})")
-        return
+    t = (warm_start or warm_start_for(start)).astimezone(timezone.utc)
+    end = end.astimezone(timezone.utc)
+    changes = fetch_history(entities, t, end)
     states = HistoryStates(changes, current_units(entities))
     replay = Tracker(store_baseline=False, keep_points=True)
     db = Database(DB_PATH)
-    t = warm_start
     while t < end:
         states.now = t
         replay.tick(t.astimezone(tz), fetch=states.fetch, write=False, live=False, db=db)
         t += TICK
+    return replay
+
+
+def seed_live_points():
+    """After a start, fill the live view's last two hours from Home Assistant history."""
+    end = datetime.now(timezone.utc)
     since = (end - LIVE_WINDOW).astimezone(tz)
+    try:
+        replay = replay_history(since, end)
+    except Exception as e:
+        print(f"⚠️ Live view starts empty: no Home Assistant history ({e})")
+        return
     replayed = replay.recent_points(since)
     # Started during a Kratt run: the live tracker had no idle readings before the signal and
     # locked 0 W. Take the baseline the replay found before the same run started instead.

@@ -6,13 +6,22 @@ The add-on talks to Home Assistant through the Supervisor, so you don't need a l
 
 ## Kratt right now
 
-The top of the page shows the current Kratt command: UP or DOWN, mFRR or aFRR, since when, the power Kratt requested, the power delivered (grid power against the baseline) and the grid power. The chart next to it covers the last two hours, updated every 10 seconds:
+The top of the page shows the current Kratt command: UP or DOWN, mFRR or aFRR, since when, the power Kratt requested, the power delivered (grid power against the baseline) and the grid power. The graph next to it shows any period:
 
 - **Grid power** (blue): the summed phases, + import / − export.
 - **Kratt target** (orange, dashed): the baseline plus the requested power in the commanded direction. The closer the grid follows it, the closer the delivery is to 100 %.
 - **Bands**: the periods with a DOWN or UP command.
 
-Hover over the chart, or focus it and use the arrow keys, to read the values at a moment. **Table view** lists them per minute.
+Moving around:
+
+- **Presets** (15 min to 7 days), **◀ ▶** to step a window back or forward, and **Live** to follow now.
+- **Go to** a date and time, or click or drag in the **7-day strip** below the graph.
+- **Drag** the graph to move it, **Shift-drag** across it to zoom into that range, **Ctrl/⌘ + scroll** or pinch to zoom, **double-click** to zoom out. With the graph focused: **+** / **−** zoom, the arrow keys read values.
+- **Show in graph** (the chart icon) on an activation opens the graph around it.
+
+Hover over the graph to read the values at a moment; **Table view** lists them.
+
+Everything comes from Home Assistant; the add-on stores no readings of its own. Windows up to 6 hours replay the recorded sensor history every 10 seconds through the tracker's logic, so they show the baseline and Kratt's target. Longer windows use Home Assistant's long-term statistics of the grid power sensors: 5-minute means while the recorder keeps them (`purge_keep_days`, 10 days by default), hourly means beyond that. The commands come from the history of the Qilowatt sensors, so they're shown as far back as the recorder keeps it. Live mode for 2 hours or less uses the tracker's own readings and updates every 10 seconds.
 
 ### Price status
 
