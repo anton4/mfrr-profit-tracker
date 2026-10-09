@@ -1,5 +1,5 @@
 // frontend/src/App.jsx
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import './App.css';
 
 // Relative, so the UI also works under a path prefix (Home Assistant Ingress); vite dev proxies /api
@@ -41,6 +41,10 @@ const HINTS = {
 };
 
 // Label with an ⓘ button: explanation on hover, keyboard focus or tap
+// Editable copy of the sensor settings; grid power always shows at least one input
+const sensorDraftOf = (values) => ({ ...values, grid_power: values.grid_power.length ? [...values.grid_power] : [''] });
+const POWER_UNITS = { w: 1, kw: 1000, mw: 1000000 };
+
 function Hint({ label, hint, align = 'left' }) {
   return (
     <span className="hint">
@@ -84,11 +88,17 @@ function App() {
   const [toolsOpen, setToolsOpen] = useState(false);
   useEffect(() => {
     if (!toolsOpen) return undefined;
-    const onKey = (e) => { if (e.key === 'Escape') setToolsOpen(false); };
+    // Escape in a sensor field only dismisses its suggestions
+    const onKey = (e) => { if (e.key === 'Escape' && !e.target.list) setToolsOpen(false); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [toolsOpen]);
   const [feeStatus, setFeeStatus] = useState(null);
+  // Home Assistant sensors the tracker reads: picked in Data tools → Sensors, else the add-on options
+  const [sensorConfig, setSensorConfig] = useState(null);   // { values, defaults, saved, problems, entities, … }
+  const [sensorDraft, setSensorDraft] = useState(null);
+  const [sensorsOpen, setSensorsOpen] = useState(false);
+  const [sensorStatus, setSensorStatus] = useState(null);
   // Period: from ?range=… (shareable links), else today
   const [filter, setFilterState] = useState(() => {
     const range = new URLSearchParams(window.location.search).get('range');
@@ -183,6 +193,48 @@ function App() {
       setFeeStatus({ ok: false, text: String(e) });
     }
   };
+
+  const loadSensors = useCallback(() => fetch(`${API_BASE}/api/sensors`)
+    .then((res) => (res.ok ? res.json() : null))
+    .then((cfg) => {
+      if (cfg) {
+        setSensorConfig(cfg);
+        setSensorDraft(sensorDraftOf(cfg.values));
+      }
+      return cfg;
+    })
+    .catch((e) => console.error('Sensor settings fetch failed', e)), []);
+  // On page load; a sensor problem opens the Sensors section in Data tools
+  useEffect(() => {
+    loadSensors().then((cfg) => { if (cfg?.problems.length) setSensorsOpen(true); });
+  }, [loadSensors]);
+  const toggleSensors = () => {
+    if (!sensorsOpen) loadSensors();   // fresh entity states
+    setSensorsOpen(!sensorsOpen);
+  };
+  const sendSensors = async (method) => {
+    setSensorStatus(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/sensors`, method === 'PUT'
+        ? { method, headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...sensorDraft, grid_power: sensorDraft.grid_power.map((id) => id.trim()).filter(Boolean) }) }
+        : { method });
+      const body = await res.json();
+      if (!res.ok) { setSensorStatus({ ok: false, text: body.detail || `Save failed (${res.status})` }); return; }
+      setSensorConfig(body);
+      setSensorDraft(sensorDraftOf(body.values));
+      setSensorStatus({ ok: true, text: method === 'PUT' ? 'Saved, used from the next reading' : 'Using the add-on options again' });
+    } catch (e) {
+      setSensorStatus({ ok: false, text: String(e) });
+    }
+  };
+  const entityById = useMemo(
+    () => Object.fromEntries((sensorConfig?.entities ?? []).map((e) => [e.entity_id, e])),
+    [sensorConfig],
+  );
+  const sensorProblemText = (p) => (p.error === 'not set'
+    ? `${sensorConfig.labels[p.field]} not set`
+    : `${p.entity_id} not found in Home Assistant`);
 
   // Backfill status on page load (e.g. a backfill started earlier is still running)
   useEffect(() => {
@@ -620,6 +672,21 @@ function App() {
           </div>
         )}
 
+        {(sensorConfig?.problems.length > 0 || sensorConfig?.ha_error) && (
+          <div className="chips">
+            <button type="button" className="chip chip-error chip-btn" onClick={() => { setToolsOpen(true); setSensorsOpen(true); }}>
+              <span className="dot dot-neg" />
+              <strong>Sensors</strong>
+              <span>
+                {sensorConfig.ha_error
+                  ? sensorConfig.ha_error
+                  : `${sensorProblemText(sensorConfig.problems[0])}${sensorConfig.problems.length > 1 ? ` + ${sensorConfig.problems.length - 1} more` : ''}`}
+                {' · '}pick them in Data tools
+              </span>
+            </button>
+          </div>
+        )}
+
         {priceSync && (
           <div className="chips">
             <div className={`chip ${priceSync.last_error ? 'chip-error' : ''}`} title="The dashboard is only queried when a finished mFRR slot is missing its price">
@@ -949,6 +1016,99 @@ function App() {
               </button>
             </div>
             <div className="drawer-body">
+        <div className="tool">
+          <button type="button" className="disclosure" aria-expanded={sensorsOpen} onClick={toggleSensors}>
+            <span className="tool-title">Sensors</span>
+            <span className="muted small">
+              {sensorConfig?.problems.length > 0
+                ? <span className="err">{sensorConfig.problems.length} problem{sensorConfig.problems.length > 1 ? 's' : ''}</span>
+                : sensorConfig ? (sensorConfig.saved ? 'picked here' : 'from the add-on options') : ''}
+            </span>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ transform: sensorsOpen ? 'rotate(180deg)' : undefined }}><path d="m6 9 6 6 6-6" /></svg>
+          </button>
+          {sensorsOpen && sensorConfig && sensorDraft && (() => {
+            const entities = sensorConfig.entities;
+            const lists = {
+              power: entities.filter((e) => e.power),
+              price: entities.some((e) => e.price) ? entities.filter((e) => e.price) : entities,
+              text: entities,
+            };
+            // Current state under each input, or why the entity can't be used
+            const note = (id) => {
+              const e = entityById[id.trim()];
+              if (!id.trim() || sensorConfig.ha_error) return null;
+              if (!e) return <span className="small err">Not found in Home Assistant</span>;
+              return <span className="small">{e.name ? `${e.name} · ` : ''}{e.state}{e.unit ? ` ${e.unit}` : ''}</span>;
+            };
+            const input = (key, value, onChange, label) => (
+              <input type="text" list={`ha-sensors-${sensorConfig.kinds[key]}`} value={value} placeholder="sensor.…"
+                aria-label={label} spellCheck={false} autoComplete="off" onChange={(ev) => onChange(ev.target.value)} />
+            );
+            const setField = (key) => (value) => setSensorDraft({ ...sensorDraft, [key]: value });
+            const phases = sensorDraft.grid_power;
+            const setPhases = (next) => setSensorDraft({ ...sensorDraft, grid_power: next });
+            // Net grid power right now, as the tracker sums it (W, + import / − export)
+            const watts = phases.map((id) => {
+              const e = entityById[id.trim()];
+              const v = Number(e?.state);
+              return e && e.state !== '' && Number.isFinite(v) ? v * (POWER_UNITS[(e.unit || 'W').toLowerCase()] ?? 1) : null;
+            });
+            const netW = watts.length && watts.every((w) => w !== null) ? watts.reduce((a, b) => a + b, 0) : null;
+            return (
+              <>
+                {Object.entries(lists).map(([kind, list]) => (
+                  <datalist key={kind} id={`ha-sensors-${kind}`}>
+                    {list.map((e) => (
+                      <option key={e.entity_id} value={e.entity_id} label={`${e.name ?? e.entity_id} · ${e.state}${e.unit ? ` ${e.unit}` : ''}`} />
+                    ))}
+                  </datalist>
+                ))}
+                {sensorConfig.ha_error && <div className="small err">{sensorConfig.ha_error}: the sensor list is empty.</div>}
+                {['source', 'mode', 'powerlimit'].map((key) => (
+                  <div key={key} className="field">
+                    <span>{sensorConfig.labels[key]}{sensorConfig.optional.includes(key) && <span className="unit"> optional</span>}</span>
+                    {input(key, sensorDraft[key] ?? '', setField(key), sensorConfig.labels[key])}
+                    {note(sensorDraft[key] ?? '')}
+                  </div>
+                ))}
+                <div className="field">
+                  <span>{sensorConfig.labels.grid_power} <span className="unit">one sensor per phase, W or kW, + import / − export</span></span>
+                  {phases.map((id, i) => (
+                    <div key={i} className="sensor-phase">
+                      <div className="sensor-row">
+                        {input('grid_power', id, (value) => setPhases(phases.map((p, j) => (j === i ? value : p))), `${sensorConfig.labels.grid_power} ${i + 1}`)}
+                        <button type="button" className="iconbtn" aria-label={`Remove grid power sensor ${i + 1}`} disabled={phases.length === 1}
+                          onClick={() => setPhases(phases.filter((_, j) => j !== i))}>
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
+                        </button>
+                      </div>
+                      {note(id)}
+                    </div>
+                  ))}
+                  <button type="button" className="btn-link sensor-add" onClick={() => setPhases([...phases, ''])}>+ Add sensor</button>
+                  {netW !== null && (
+                    <span className="small num">Net grid now: {Math.round(Math.abs(netW))} W {netW >= 0 ? 'import' : 'export'}</span>
+                  )}
+                </div>
+                <div className="field">
+                  <span>{sensorConfig.labels.nordpool}</span>
+                  {input('nordpool', sensorDraft.nordpool ?? '', setField('nordpool'), sensorConfig.labels.nordpool)}
+                  {note(sensorDraft.nordpool ?? '')}
+                </div>
+                <div className="tool-form">
+                  <button type="button" className="btn" onClick={() => sendSensors('PUT')}>Save sensors</button>
+                  {sensorConfig.saved && <button type="button" className="btn-link" onClick={() => sendSensors('DELETE')}>Use the add-on options</button>}
+                </div>
+                {sensorStatus && <div className={`small ${sensorStatus.ok ? 'ok' : 'err'}`}>{sensorStatus.text}</div>}
+                <div className="muted small">
+                  Start typing to search your Home Assistant sensors. Sensors saved here override the add-on configuration
+                  {sensorConfig.saved ? '.' : '; until then the tracker uses the add-on options.'}
+                </div>
+              </>
+            );
+          })()}
+        </div>
+        <div className="divider" />
         <div className="tool">
           <div className="tool-title">Backfill from Home Assistant</div>
           <div className="tool-form">

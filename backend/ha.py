@@ -4,16 +4,14 @@ from datetime import datetime
 
 import requests
 
+import sensors
+
 HA_URL = os.getenv("HA_URL", "http://localhost:8123")
 HA_TOKEN = os.getenv("HA_TOKEN")
 
-# Entities (from .env)
-SENSOR_SOURCE = os.environ["SENSOR_SOURCE"]           # sensor.qw_source (== "Kratt" during an mFRR command)
-SENSOR_MODE = os.environ["SENSOR_MODE"]               # sensor.qw_mode: frrdown → DOWN, frrup → UP
-SENSOR_POWERLIMIT = os.getenv("SENSOR_POWERLIMIT")    # sensor.qw_powerlimit: requested power (optional)
-# Grid power per phase (W, +import / -export), comma-separated (e.g. Shelly 3EM channel a/b/c power)
-SENSOR_GRID_POWER = [e.strip() for e in os.environ["SENSOR_GRID_POWER"].split(",") if e.strip()]
-SENSOR_NORDPOOL = os.environ["SENSOR_NORDPOOL"]       # nordpool price (€/kWh)
+# Entities: sensors.current() — source (== "Kratt" during an mFRR command), mode (frrdown → DOWN,
+# frrup → UP), optional power limit (requested power), grid power per phase (W, +import /
+# -export, e.g. Shelly 3EM channel a/b/c power) and the Nord Pool price (€/kWh)
 
 PROVIDER = "kratt"
 DOWN_MODES = {"frrdown"}
@@ -23,18 +21,72 @@ _POWER_UNITS = {"w": 1.0, "kw": 1000.0, "mw": 1_000_000.0}
 
 _HEADERS = {"Authorization": f"Bearer {HA_TOKEN}", "Content-Type": "application/json"}
 
+_failing = {}   # entity_id → last fetch error, logged once until the entity is readable again
+
+
+def _fetch_failed(entity_id: str, error: str) -> None:
+    if _failing.get(entity_id) != error:
+        print(f"❌ {error}")
+    _failing[entity_id] = error
+
 
 def get_entity(entity_id: str) -> dict | None:
     """Full HA state object (state + attributes), or None on failure."""
+    if not entity_id:
+        return None
     try:
         resp = requests.get(f"{HA_URL}/api/states/{entity_id}", headers=_HEADERS, timeout=5)
-        if not resp.ok:
-            print(f"❌ Failed to fetch {entity_id}: {resp.status_code}")
-            return None
+    except Exception as e:
+        _fetch_failed(entity_id, f"Error fetching {entity_id}: {e}")
+        return None
+    if resp.status_code == 404:
+        _fetch_failed(entity_id, f"{entity_id} doesn't exist in Home Assistant (404). "
+                                 "Pick the right sensor under Data tools → Sensors")
+        return None
+    if not resp.ok:
+        _fetch_failed(entity_id, f"Failed to fetch {entity_id}: {resp.status_code}")
+        return None
+    if _failing.pop(entity_id, None):
+        print(f"✅ {entity_id} is readable again")
+    return resp.json()
+
+
+def get_states() -> list[dict] | None:
+    """All HA state objects, or None if Home Assistant can't be reached."""
+    try:
+        resp = requests.get(f"{HA_URL}/api/states", headers=_HEADERS, timeout=10)
+        resp.raise_for_status()
         return resp.json()
     except Exception as e:
-        print(f"❌ Error fetching {entity_id}: {e}")
+        print(f"❌ Failed to list Home Assistant entities: {e}")
         return None
+
+
+def is_power_sensor(entity: dict) -> bool:
+    attrs = entity.get("attributes", {})
+    unit = (attrs.get("unit_of_measurement") or "").strip().lower()
+    return entity["entity_id"].startswith("sensor.") and (
+        unit in _POWER_UNITS or attrs.get("device_class") == "power")
+
+
+def log_sensor_check() -> None:
+    """On start: print the sensors in use, and which of them Home Assistant doesn't have."""
+    values, picked = sensors.load()
+    print(f"🔌 Sensors {'picked in the UI' if picked else 'from the add-on options'}: {sensors.describe(values)}")
+    states = get_states()
+    if states is None:
+        return
+    problems = sensors.problems({s["entity_id"] for s in states}, values)
+    for p in problems:
+        label = sensors.FIELDS[p["field"]][0]
+        print(f"❌ {label}: not set" if p["error"] == "not set"
+              else f"❌ {label}: {p['entity_id']} doesn't exist in Home Assistant")
+    if any(sensors.FIELDS[p["field"]][2] == "power" for p in problems):
+        power = sorted(s["entity_id"] for s in states if is_power_sensor(s))
+        shown = ", ".join(power[:20]) + (f" … and {len(power) - 20} more" if len(power) > 20 else "")
+        print(f"   Power sensors in Home Assistant: {shown or 'none'}")
+    if problems:
+        print("   Pick the sensors in the tracker's UI under Data tools → Sensors")
 
 
 # Every reader takes an optional `fetch` (entity_id → HA state dict). Live reads use get_entity;
@@ -60,9 +112,10 @@ def _get_scaled(entity_id: str, units: dict, default_unit: str, fetch=None) -> f
 
 def get_requested_w(fetch=None) -> float | None:
     """Power Kratt requested for the current command (W, unsigned)."""
-    if not SENSOR_POWERLIMIT:
+    entity_id = sensors.current()["powerlimit"]
+    if not entity_id:
         return None
-    value = _get_scaled(SENSOR_POWERLIMIT, _POWER_UNITS, "W", fetch)
+    value = _get_scaled(entity_id, _POWER_UNITS, "W", fetch)
     return abs(value) if value is not None else None
 
 
@@ -72,8 +125,11 @@ def get_grid_power_w(fetch=None) -> float | None:
     Summing signed phase powers nets the phases like a phase-summing utility meter,
     so one phase importing while another exports does not count as both.
     """
+    phases = sensors.current()["grid_power"]
+    if not phases:
+        return None
     total = 0.0
-    for entity_id in SENSOR_GRID_POWER:
+    for entity_id in phases:
         value = _get_scaled(entity_id, _POWER_UNITS, "W", fetch)
         if value is None:
             return None   # a partial sum would misstate the grid flow
@@ -125,7 +181,7 @@ class GridMeter:
 
 def get_source_changed(fetch=None):
     """When qw_source last changed (the start of the current Kratt run), or None."""
-    entity = (fetch or get_entity)(SENSOR_SOURCE)
+    entity = (fetch or get_entity)(sensors.current()["source"])
     ts = (entity or {}).get("last_changed")
     if not ts:
         return None
@@ -149,10 +205,11 @@ def classify_market(run_start: datetime) -> str:
 
 def get_signal(fetch=None) -> str | None:
     """'UP' / 'DOWN' while Kratt is in control, otherwise None."""
-    source = get_state(SENSOR_SOURCE, fetch)
+    sensor = sensors.current()
+    source = get_state(sensor["source"], fetch)
     if not source or source.strip().lower() != PROVIDER:
         return None
-    mode = (get_state(SENSOR_MODE, fetch) or "").strip().lower()
+    mode = (get_state(sensor["mode"], fetch) or "").strip().lower()
     if mode in DOWN_MODES:
         return "DOWN"
     if mode in UP_MODES:

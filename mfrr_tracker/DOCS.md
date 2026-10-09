@@ -22,6 +22,14 @@ The add-on talks to Home Assistant through the Supervisor, so you don't need a l
 | `fee_*` | Optional fee defaults in cents/kWh excl. VAT (`fee_vat` in %). Fees can also be edited in the UI under **Data tools → Electricity fees**. |
 | `publish_sensors` | Publish the summary sensors below to Home Assistant. |
 
+### Picking the sensors
+
+Home Assistant has no entity picker for add-on options, so the sensor fields there are plain text. In the `sensor_grid_power` list, type the full entity ID and choose **Add custom item**. Shelly entity IDs usually contain the device ID, e.g. `sensor.shellyem3_485519dbeee9_channel_a_power`. The defaults are only examples.
+
+The easier way is the tracker's own UI: **Data tools → Sensors** lists your Home Assistant sensors with their current values. Start typing to search, and add one grid power sensor per phase. The summed grid power is shown as a check (+ import / − export). Sensors saved there override the add-on options until you click **Use the add-on options**.
+
+On start, the add-on log shows the sensors in use and any that Home Assistant doesn't have, together with the power sensors it does have. The UI shows a warning that opens the Sensors section.
+
 ## Sensors published to Home Assistant
 
 With `publish_sensors` on, the add-on updates these entities every minute:
