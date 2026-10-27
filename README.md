@@ -234,7 +234,7 @@ Rebuilds the slot rows for a past period from Home Assistant's recorded history.
 
 -   mFRR prices come from the Baltic Transparency Dashboard for the whole range. Nord Pool prices come from Elering's public API (`dashboard.elering.ee/api/nps/price`, Estonia). Profit is then recalculated.
 
--   HA keeps history for the recorder's `purge_keep_days`, 10 days by default. Older ranges return a "no history" error.
+-   HA keeps history for the recorder's `purge_keep_days`, 10 days by default. HA doesn't publish that setting, so the tracker reads the sensors' history to find the oldest moment all of them have a state, and the Backfill form starts there (at the first quarter with two minutes of history before it). Older ranges are refused, and a sensor the recorder doesn't record is named. `GET /api/backfill/range` returns the range (`?refresh=1` checks again; otherwise it is kept for an hour).
 
 How to run it:
 

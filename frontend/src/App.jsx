@@ -175,6 +175,22 @@ function App() {
   };
   const [backfillError, setBackfillError] = useState(null);
   const backfillRunning = backfill?.state === 'running';
+  // How far back Home Assistant keeps the sensors' history: the earliest slot a backfill can start
+  const [historyRange, setHistoryRange] = useState(null);
+  const loadHistoryRange = () => fetch(`${API_BASE}/api/backfill/range`)
+    .then((res) => (res.ok ? res.json() : null))
+    .then((r) => {
+      if (!r) return;
+      setHistoryRange(r);
+      if (r.earliest) {
+        const min = toLocalInput(new Date(r.earliest));
+        setBackfillRange((prev) => (prev.from < min ? { ...prev, from: min } : prev));
+      }
+    })
+    .catch((e) => console.error('History range fetch failed', e));
+  const backfillMin = historyRange?.earliest ? toLocalInput(new Date(historyRange.earliest)) : undefined;
+  const backfillTooEarly = Boolean(backfillMin && backfillRange.from && backfillRange.from < backfillMin);
+  const historyMissing = historyRange?.missing?.length > 0;
 
   const loadSensorStatus = useCallback(() => fetch(`${API_BASE}/api/sensors`)
     .then((res) => (res.ok ? res.json() : null))
@@ -187,6 +203,7 @@ function App() {
   // Fresh sensor states for the Configuration section whenever it's shown
   const openTools = (withConfig = false) => {
     setToolsOpen(true);
+    loadHistoryRange();
     if (withConfig) setConfigOpen(true);
     if (withConfig || configOpen) loadSensorStatus();
   };
@@ -1053,15 +1070,15 @@ function App() {
           <div className="tool-form">
             <label className="field">
               From
-              <input type="datetime-local" value={backfillRange.from} disabled={backfillRunning}
-                onChange={(e) => setBackfillRange({ ...backfillRange, from: e.target.value })} />
+              <input type="datetime-local" value={backfillRange.from} min={backfillMin} max={toLocalInput(currentSlotStart())}
+                disabled={backfillRunning} onChange={(e) => setBackfillRange({ ...backfillRange, from: e.target.value })} />
             </label>
             <label className="field">
               To
-              <input type="datetime-local" value={backfillRange.to} max={toLocalInput(currentSlotStart())} disabled={backfillRunning}
+              <input type="datetime-local" value={backfillRange.to} min={backfillMin} max={toLocalInput(currentSlotStart())} disabled={backfillRunning}
                 onChange={(e) => setBackfillRange({ ...backfillRange, to: e.target.value })} />
             </label>
-            <button type="button" className="btn" onClick={startBackfill} disabled={backfillRunning || !backfillRange.from || !backfillRange.to}>
+            <button type="button" className="btn" onClick={startBackfill} disabled={backfillRunning || !backfillRange.from || !backfillRange.to || backfillTooEarly || historyMissing}>
               {backfillRunning ? 'Backfilling…' : 'Backfill'}
             </button>
           </div>
@@ -1083,10 +1100,27 @@ function App() {
               {backfill.message} · {fmtSlot(backfill.from).split('–')[0]} → {fmtSlot(backfill.to).split('–')[0]}
             </div>
           )}
+          {historyMissing && (
+            <div className="err small">
+              Home Assistant records no history for {historyRange.missing.join(', ')}: check the recorder's include and
+              exclude settings.
+            </div>
+          )}
+          {backfillTooEarly && !backfillRunning && (
+            <div className="err small">From is before the oldest history Home Assistant keeps.</div>
+          )}
           {backfill?.state === 'error' && <div className="err small">{backfill.message}</div>}
           {backfillError && <div className="err small">{backfillError}</div>}
           <div className="muted small">
-            Replays Home Assistant history through the tracker; rows in the range are recomputed. History is kept for <code>purge_keep_days</code> (10 days by default).
+            Replays Home Assistant history through the tracker; rows in the range are recomputed.{' '}
+            {historyRange?.earliest && (
+              <>
+                Home Assistant keeps the history of the tracker's sensors from {fmtSlot(historyRange.history_from).split('–')[0]}
+                {historyRange.limited_by?.length === 1 && ` (limited by ${historyRange.limited_by[0]})`}, so a backfill can
+                start at {fmtSlot(historyRange.earliest).split('–')[0]} at the earliest.{' '}
+              </>
+            )}
+            {historyRange?.error && <>{historyRange.error}. History is kept for <code>purge_keep_days</code> (10 days by default).{' '}</>}
             The backfill runs in the add-on, so you can close this page or go elsewhere while it works.
           </div>
         </div>

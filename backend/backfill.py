@@ -15,7 +15,7 @@ import mffr_price_updater
 import entsoe_cbmp
 import profit_calc
 import sensors
-from history import HistoryStates, current_units, fetch_history
+from history import HistoryStates, current_units, fetch_history, oldest_history
 from main import DB_PATH, Tracker
 
 tz = pytz.timezone("Europe/Tallinn")
@@ -46,6 +46,74 @@ def _rows_in_range(db: Database, start: datetime, end: datetime) -> list[dict]:
     return [r for r in rows if start <= datetime.fromisoformat(r["timeslot"]) < end]
 
 
+# The first slot a backfill may start: history_from plus this much (the meter's first reading and the 60 s
+# pre-signal baseline), rounded up to a quarter
+HISTORY_LEAD = timedelta(minutes=2)
+RANGE_TTL = timedelta(hours=1)        # the recorder purges once a night
+RANGE_ERROR_TTL = timedelta(minutes=1)
+
+_range_cache = {"key": None, "at": None, "value": None}
+_range_lock = threading.Lock()
+
+
+def _needed_entities() -> list[str]:
+    """The sensors a backfill replays, as run_backfill reads them."""
+    sensor = sensors.current()
+    entities = [sensor["source"], sensor["mode"], *(sensor["grid_power"] or [])]
+    if sensor["powerlimit"]:
+        entities.append(sensor["powerlimit"])
+    return [e for e in entities if e]
+
+
+def _ceil_slot(dt: datetime) -> datetime:
+    floor = _floor_slot(dt)
+    return floor if floor == dt.astimezone(tz) else _floor_slot(floor + SLOT)
+
+
+def _fmt(dt: datetime) -> str:
+    return dt.astimezone(tz).strftime("%d.%m.%Y %H:%M")
+
+
+def available_range(force: bool = False) -> dict:
+    """The slots a backfill can rebuild: from the oldest history Home Assistant keeps for the tracker's sensors to
+    the start of the current slot. Cached for RANGE_TTL per sensor list (RANGE_ERROR_TTL after an error)."""
+    now = datetime.now(tz)
+    entities = _needed_entities()
+    key = tuple(entities)
+    with _range_lock:
+        cached, at = _range_cache["value"], _range_cache["at"]
+        ttl = RANGE_ERROR_TTL if cached and cached["error"] else RANGE_TTL
+        if not force and cached and _range_cache["key"] == key and now - at < ttl:
+            return {**cached, "latest": _floor_slot(now).isoformat()}
+        value = {"history_from": None, "earliest": None, "limited_by": [], "missing": [],
+                 "checked_at": now.isoformat(), "error": None}
+        if not entities:
+            value["error"] = "Set the Qilowatt and grid power sensors in the add-on configuration first"
+        else:
+            try:
+                found = oldest_history(entities, now)
+                value.update(limited_by=found["limited_by"], missing=found["missing"])
+                if found["history_from"] is not None:
+                    value["history_from"] = found["history_from"].astimezone(tz).isoformat()
+                    value["earliest"] = _ceil_slot(found["history_from"] + HISTORY_LEAD).isoformat()
+            except Exception as e:
+                value["error"] = f"Couldn't read Home Assistant's history: {e}"
+        _range_cache.update(key=key, at=now, value=value)
+        return {**value, "latest": _floor_slot(now).isoformat()}
+
+
+def check_start(start: datetime) -> None:
+    """Refuse a start before the oldest history Home Assistant keeps (or with no history for a sensor). When that
+    couldn't be read, the backfill goes ahead and says if the history is missing."""
+    r = available_range()
+    if r["missing"]:
+        raise ValueError(f"Home Assistant records no history for {', '.join(r['missing'])}: check the "
+                         "recorder's include and exclude settings")
+    if r["earliest"] and _floor_slot(start) < datetime.fromisoformat(r["earliest"]):
+        raise ValueError(f"Home Assistant keeps history from {_fmt(datetime.fromisoformat(r['history_from']))}, "
+                         f"so a backfill can start at {_fmt(datetime.fromisoformat(r['earliest']))} at the earliest")
+
+
 def fetch_nps_prices(start: datetime, end: datetime) -> list[tuple[datetime, float]]:
     """Estonian Nord Pool day-ahead prices from Elering: [(utc_start, €/kWh)] sorted."""
     fmt = "%Y-%m-%dT%H:%M:%S.000Z"
@@ -65,6 +133,7 @@ def run_backfill(start: datetime, end: datetime, progress=lambda phase, pct: Non
     end = min(_floor_slot(end), _floor_slot(datetime.now(tz)))   # never touch the live slot
     if start >= end:
         raise ValueError("Empty range: 'to' must be after 'from' and before the current slot")
+    check_start(start)
 
     sensor = sensors.current()
     grid_power = sensor["grid_power"]
@@ -152,6 +221,7 @@ status = {"state": "idle", "from": None, "to": None, "phase": None, "progress": 
 
 
 def start_job(start: datetime, end: datetime) -> dict:
+    check_start(start)   # answer right away instead of from the background job
     if not _lock.acquire(blocking=False):
         raise RuntimeError("A backfill is already running")
     status.update(state="running", phase="starting", progress=0, slots_written=None, message=None,

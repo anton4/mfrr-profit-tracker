@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.7.2
+
+- Backfill only offers the dates Home Assistant still has history for. The tracker reads the history of its sensors (Qilowatt source, mode and power limit, and the grid power phases) to find how far back the recorder keeps it, since Home Assistant doesn't publish `purge_keep_days`. The form says from when, the date pickers start there, and an older start is refused instead of failing with "no history".
+- When the recorder doesn't record one of those sensors, the form names it and backfill stays off.
+
 ## 1.7.1
 
 - Kratt runs that start right at a quarter (hh:00, :15, :30, :45) are mFRR, like those starting a minute before it. On 2026-10-26 the runs from 11:00 and 13:00 were priced as aFRR (118–400 €/MWh) where Qilowatt paid mFRR (155–649 €/MWh). That is also why the mFRR price line stopped at 21.10: prices are only fetched for mFRR rows.

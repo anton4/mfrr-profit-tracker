@@ -253,6 +253,12 @@ def get_price_sync():
 def get_backfill_status():
     return backfill.status
 
+@app.get("/api/backfill/range")
+def get_backfill_range(refresh: bool = False):
+    """The slots a backfill can rebuild: from the oldest history Home Assistant keeps for the tracker's sensors
+    (found by reading that history; HA doesn't publish purge_keep_days) to the start of the current slot."""
+    return backfill.available_range(force=refresh)
+
 @app.post("/api/backfill", status_code=202)
 def start_backfill(payload: dict = Body(...)):
     """Rebuild slot rows in [from, to) from Home Assistant history (runs in the background)."""
@@ -265,6 +271,8 @@ def start_backfill(payload: dict = Body(...)):
         raise HTTPException(400, "'to' must be after 'from'")
     try:
         return backfill.start_job(start, end)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     except RuntimeError as e:
         raise HTTPException(409, str(e))
 
