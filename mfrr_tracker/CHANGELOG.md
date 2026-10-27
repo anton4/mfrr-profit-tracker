@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.7.1
+
+- Kratt runs that start right at a quarter (hh:00, :15, :30, :45) are mFRR, like those starting a minute before it. On 2026-10-26 the runs from 11:00 and 13:00 were priced as aFRR (118–400 €/MWh) where Qilowatt paid mFRR (155–649 €/MWh). That is also why the mFRR price line stopped at 21.10: prices are only fetched for mFRR rows.
+- A run that comes back within a minute of the previous one ending keeps its market (Kratt left for 20 s at 13:15 on 2026-10-26).
+- Importing a Qilowatt signals report corrects slots whose rows say "MFRR, AFRR": they count as mFRR, priced like Qilowatt prices them. To reprice a past day, import its signals report or run a backfill.
+- aFRR market price (ENTSO-E CBMP): the day the clocks go back (25 hours) is fetched in two parts. ENTSO-E refused it as longer than a day, and that also held back every later day. A day that fails no longer blocks the others.
+
 ## 1.7.0
 
 - The period at the top and the graph are one window. Picking Today, Yesterday, This week, … shows that period in the graph (live while it reaches now; All shows the last 31 days), and zooming or moving the graph sets the period to Custom with the graph's window, so the figures and tables follow the graph.

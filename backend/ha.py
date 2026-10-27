@@ -193,11 +193,13 @@ def get_source_changed(fetch=None):
 def classify_market(run_start: datetime) -> str:
     """mFRR vs aFRR from the run's start time.
 
-    Scheduled mFRR activations start exactly one minute before a quarter (hh:14/29/44/59:00)
-    and are updated every ~4 min; aFRR starts at arbitrary times, is updated about every
-    minute and ends with a ~5 min restore. Matched all 18 runs in a Qilowatt signals report.
+    Scheduled mFRR activations start one minute before a quarter (hh:14/29/44/59:00) and are
+    updated every ~4 min; aFRR starts at arbitrary times, is updated about every minute and ends
+    with a ~5 min restore. Matched all 18 runs in an earlier Qilowatt signals report. Kratt also
+    starts mFRR runs right at the quarter: on 2026-10-26 the runs from 11:00:00 and 13:00:00 are
+    MFRR in Qilowatt's report.
     """
-    if run_start.minute % 15 == 14 and run_start.second <= 20:
+    if run_start.minute % 15 in (14, 0) and run_start.second <= 20:
         return "MFRR"
     return "AFRR"
 

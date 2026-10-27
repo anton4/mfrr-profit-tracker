@@ -103,12 +103,26 @@ def parse(xml_text: str) -> list[tuple[int, str, float]]:
     return points
 
 
+# ENTSO-E serves this document for at most one day per request
+MAX_REQUEST_SPAN = timedelta(days=1)
+
+
 def fetch_day(day: date) -> list[tuple[int, str, float]]:
-    """CBMP for one Tallinn day from the ENTSO-E API. Raises on HTTP or API errors."""
+    """CBMP for one Tallinn day from the ENTSO-E API. Raises on HTTP or API errors.
+    The day the clocks go back has 25 hours, so it is asked for in two parts."""
     if not configured():
         raise RuntimeError("ENTSO-E API token not set (ENTSOE_TOKEN)")
     start = tz.localize(datetime(day.year, day.month, day.day)).astimezone(timezone.utc)
     end = tz.localize(datetime.combine(day + timedelta(days=1), datetime.min.time())).astimezone(timezone.utc)
+    points = []
+    while start < end:
+        part_end = min(start + MAX_REQUEST_SPAN, end)
+        points.extend(_fetch(start, part_end))
+        start = part_end
+    return points
+
+
+def _fetch(start: datetime, end: datetime) -> list[tuple[int, str, float]]:
     resp = requests.get(ENTSOE_API, params={
         "securityToken": ENTSOE_TOKEN,
         "documentType": "A84",
@@ -128,11 +142,13 @@ def fetch_day(day: date) -> list[tuple[int, str, float]]:
 
 def ensure_days(days: set[date], db: Database | None = None) -> int:
     """Fetch the CBMP of the given days into the cache. A past day is fetched once; today at most
-    hourly. Returns the number of days fetched."""
+    hourly. A day that fails doesn't hold back the others; the first error is raised at the end.
+    Returns the number of days fetched."""
     db = db or Database(DB_PATH)
     _ensure_schema(db)
     now = datetime.now(tz)
     fetched = 0
+    error = None
     for day in sorted(days):
         if day > now.date():
             continue
@@ -144,11 +160,17 @@ def ensure_days(days: set[date], db: Database | None = None) -> int:
                 continue
         except Exception:
             pass
-        points = fetch_day(day)
+        try:
+            points = fetch_day(day)
+        except Exception as e:
+            error = error or e
+            continue
         db["afrr_cbmp"].upsert_all(({"ts": t, "dir": d, "price": p} for t, d, p in points), pk=("ts", "dir"))
         db["afrr_cbmp_days"].upsert({"day": day.isoformat(), "fetched_at": now.isoformat(),
                                      "points": len(points), "source": SOURCE}, pk="day")
         fetched += 1
+    if error:
+        raise error
     return fetched
 
 
@@ -169,15 +191,25 @@ def row_window(row: dict) -> tuple[datetime, datetime]:
 
 
 def fill_rows(db: Database, rows: list[dict]) -> int:
-    """Fetch the needed days and set cbmp_avg / cbmp_points on aFRR rows. Returns rows updated."""
-    days = set()
+    """Fetch the needed days and set cbmp_avg / cbmp_points on aFRR rows. Returns rows updated.
+    Rows on a day that couldn't be fetched are left for the next try, then the error is raised."""
+    row_days = {}
     for r in rows:
         a, b = row_window(r)
-        days.update({a.astimezone(tz).date(), b.astimezone(tz).date()})
-    ensure_days(days, db)
+        row_days[r["id"]] = {a.astimezone(tz).date(), b.astimezone(tz).date()}
+    error = None
+    try:
+        ensure_days(set().union(*row_days.values()), db)
+    except Exception as e:
+        error = e
+    cached = {date.fromisoformat(d["day"]) for d in db["afrr_cbmp_days"].rows}
     updated = 0
     for r in rows:
+        if not row_days[r["id"]] <= cached:
+            continue
         avg, n = cbmp_avg(db, r["signal"], *row_window(r))
         db["slots"].update(r["id"], {"cbmp_avg": avg, "cbmp_points": n}, alter=True)
         updated += 1
+    if error:
+        raise error
     return updated

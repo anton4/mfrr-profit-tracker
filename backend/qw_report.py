@@ -104,20 +104,32 @@ def _import_signals(db: Database, rows: list[dict]) -> dict:
             "to": max((r["start"] for r in records), default=None)}
 
 
+def report_market(value: str | None) -> str | None:
+    """MFRR / AFRR from a report's Market column ("MFRR", "AFRR", "MFRR, AFRR" or empty)."""
+    markets = {m.strip().upper() for m in (value or "").split(",") if m.strip()}
+    if "MFRR" in markets:
+        return "MFRR"
+    if "AFRR" in markets:
+        return "AFRR"
+    return None
+
+
 def _correct_markets(db: Database, signals: list[dict]) -> int:
     """Set the market of tracker rows from the report where it disagrees with the timing rule.
 
-    A slot is only corrected when the report shows a single market for it.
+    A slot is only corrected when the report shows a single market for it. "MFRR, AFRR" counts
+    as MFRR: Qilowatt prices those rows at the mFRR price.
     """
     if "slots" not in db.table_names() or "market" not in db["slots"].columns_dict:
         return 0
     slot_markets = {}
     for s in signals:
-        if not s["market"]:
+        market = report_market(s["market"])
+        if not market:
             continue
         start = datetime.fromisoformat(s["start"])
         slot = start.replace(minute=(start.minute // 15) * 15, second=0).isoformat()
-        slot_markets.setdefault(slot, set()).add(s["market"])
+        slot_markets.setdefault(slot, set()).add(market)
     corrected = 0
     for slot, markets in slot_markets.items():
         if len(markets) != 1:

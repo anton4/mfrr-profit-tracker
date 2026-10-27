@@ -305,6 +305,7 @@ The image builds the UI with Node 26 and runs the backend on Python 3.14. For lo
 ```
 cd backend && uvicorn api:app --reload        # API on :8000
 cd frontend && npm install && npm run dev     # UI on :5173, proxies /api to :8000
+uv run --no-project --with-requirements backend/requirements.txt --with pytest pytest -q backend/tests   # backend tests
 ```
 
 * * * * *

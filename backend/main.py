@@ -143,6 +143,7 @@ class Tracker:
         self.last_logged_signal = None
         self.run_market = None   # market of the current Kratt run
         self.run_start = None
+        self.last_run = None     # (end, market) of the previous Kratt run
         self.run_rows = {}       # slot key → ids of rows this run wrote in that slot
         self.boundary = None     # quarter an mFRR run crossed: was the last minute a ramp?
 
@@ -176,13 +177,15 @@ class Tracker:
             self._resolve_boundary(now, active=signal is not None, db=db)
 
         if not signal:
+            if self.run_market is not None:
+                self.last_run = (now, self.run_market)
             self.run_market = self.run_start = None
             self.run_rows = {}
             self._record(now, None)
             return
         if self.run_market is None:
             self.run_start = (get_source_changed(fetch) or now).astimezone(tz)
-            self.run_market = classify_market(self.run_start)
+            self.run_market = self._resumed_market(self.run_start) or classify_market(self.run_start)
             if live:
                 print(f"🏷️  Kratt run from {self.run_start.isoformat()} classified as {self.run_market}")
         requested_w = get_requested_w(fetch)
@@ -281,6 +284,17 @@ class Tracker:
             else:
                 db["slots"].insert(row, pk="id", alter=True)
             self.run_rows.setdefault(key, set()).add(row["id"])
+
+    # A run that starts this soon after the previous one ended continues it (same market)
+    RESUME_S = 60
+
+    def _resumed_market(self, run_start: datetime) -> str | None:
+        """The previous run's market when this run follows it within RESUME_S. On 2026-10-26 Kratt's
+        mFRR run left for 20 s at 13:15:04 and came back at 13:15:24, which the timing rule calls aFRR."""
+        if self.last_run is None:
+            return None
+        end, market = self.last_run
+        return market if (run_start - end).total_seconds() < self.RESUME_S else None
 
     # Seconds after a quarter within which an ending mFRR run counts as ending at the quarter
     # (HA reports the end a few seconds late)
