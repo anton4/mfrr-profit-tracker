@@ -141,9 +141,11 @@ button { font: inherit; }
 .section-head.padded { padding: 16px 20px; border-bottom: 1px solid var(--line); align-items: center; }
 .scroll-x { overflow-x: auto; }
 
-.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px; }
-.kpi { padding: 18px 20px; display: flex; flex-direction: column; gap: 6px; }
-.kpi-value { font-size: 30px; font-weight: 500; letter-spacing: -0.02em; line-height: 1.2; }
+/* Six cards on one line on desktop, three per line on tablets, two on phones (720px block) */
+.kpis { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; }
+.kpi { padding: 16px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.kpi-value { font-size: clamp(22px, 1.6vw, 30px); font-weight: 500; letter-spacing: -0.02em; line-height: 1.2; }
+@media (max-width: 1200px) { .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 .kpi-row { display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px; }
 .kpi-sub { font-size: 18px; }
 .splitbar { display: flex; height: 8px; border-radius: 999px; overflow: hidden; background: var(--surface-2); margin-top: 4px; }
@@ -480,8 +482,10 @@ button { font: inherit; }
 .kpi-compare { padding: 4px 8px; margin: 2px 0; border-radius: 8px; background: var(--surface-2); align-self: flex-start; }
 
 /* average price card */
-.price-row { display: grid; grid-template-columns: 64px auto 1fr; align-items: center; gap: 10px; }
-.price-value { font-size: 24px; font-weight: 500; letter-spacing: -0.02em; }
+/* pill + price on one line, the explanation below it (cards are narrow with six on a line) */
+.price-row { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 2px 8px; }
+.price-row > .muted { grid-column: 1 / -1; }
+.price-value { font-size: clamp(18px, 1.3vw, 24px); font-weight: 500; letter-spacing: -0.02em; }
 .price-row .pill { justify-self: start; }
 
 /* ---------- data tools drawer ---------- */

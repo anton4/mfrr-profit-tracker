@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.7.5
+
+- The six cards at the top (Net result, Activation share, Fees, Regulated energy, Activations, Average price) fit on one line on desktop, three per line below 1200 px and two on phones. In the Average price card the explanation is under the price.
+
 ## 1.7.4
 
 - The activation share is Kratt's payout, so the Fees toggle doesn't change it: network and seller fees apply to your electricity bill, on the extra import or export the activation caused, and they are already in Net result (Activation + Energy € + Fees). Taking them off the activation share as well would count them twice and break the comparison with the Qilowatt report.
