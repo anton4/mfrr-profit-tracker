@@ -17,8 +17,10 @@ const HINTS = {
   energy: 'Regulated energy, measured at the grid connection against the baseline (the grid power just before the signal). DOWN = extra import or less export, UP = extra export or less import. This is the energy Kratt settles.',
   requested: 'Energy Kratt asked to regulate: how far its grid target (qw_powerlimit) is from the baseline × the time it was requested.',
   delivery: 'Regulated energy ÷ requested energy. 100% means the battery followed the command fully; above 100% is overshoot.',
-  activation: 'Your share of Kratt\'s activation revenue after Kratt\'s fee (20% by default). UP: (market price − NPS) × energy; DOWN: (NPS − market price) × energy.',
-  net: 'Activation revenue plus the change in your electricity bill compared with staying at the baseline. With Fees on, network and seller fees are included; otherwise import is spot + VAT and export is spot.',
+  activation: 'Your share of Kratt\'s activation revenue after Kratt\'s fee (20% by default). UP: (market price − NPS) × energy; DOWN: (NPS − market price) × energy. Network and seller fees don\'t apply to it; they are in Net.',
+  shareKpi: 'Kratt\'s payout to you, before your electricity bill. No network or seller fees apply to it, so the Fees toggle leaves it unchanged. Your earnings after the bill and fees are in Net result.',
+  netKpi: 'What you actually earned: Kratt\'s activation share plus the change in your electricity bill compared with the baseline. With Fees on, network and seller fees on the extra import/export are included.',
+  net:'Activation revenue plus the change in your electricity bill compared with staying at the baseline. With Fees on, network and seller fees are included; otherwise import is spot + VAT and export is spot.',
   effPrice: 'Effective price per kWh, including Kratt\'s payment and the energy bill effect (and fees when Fees is on). DOWN: what each kWh you charged actually cost you (negative = you were paid to charge). UP: what each kWh you delivered actually earned you. Compare with the average spot price of the same slots.',
   backup: 'Share of activations that started 15 s or more after their slot began (joined mid-slot).',
   cancelled: 'Share of activations that ended before their slot did. For mFRR the slot\'s last minute belongs to the next activation.',
@@ -32,6 +34,7 @@ const HINTS = {
   cbmp: 'Real Estonian aFRR cross-border marginal price (CBMP): the average of the 4-second prices published while this activation ran (from ENTSO-E, PICASSO). Kratt has paid 1.3–3× this in its reports, so income keeps using the estimate or the imported report.',
   grid: 'Net grid energy during the activation: + import, − export.',
   energyEur: 'Change in your electricity bill at spot price (plus VAT on import) compared with staying at the baseline: extra import costs, extra export earns, avoided import saves.',
+  feesKpi: 'Your electricity fees on the energy activations moved against the baseline, worked out from the fee settings in Configuration (network package, state fees, seller margin, VAT, export fees). − = paid, + = saved (less import than the baseline means fees not paid). Kratt\'s payout has no fees in it; they are part of your bill, so they count in Net result when Fees is on.',
   feesEur: 'What network and seller fees add (−) or save (+) for this activation on top of Energy €: network tariff, renewable energy, excise, balancing and security of supply fees, seller margin (with VAT) and export fees. Counted in Net only when Fees is on.',
   totals: 'Sums for all activations in the selected period. Delivery = total regulated ÷ total requested energy.',
   bill: 'Change in your electricity bill compared with what the baseline would have imported or exported in the same time.',
@@ -43,6 +46,15 @@ const HINTS = {
   backupRow: 'Started 15 s or more after the slot began.',
   cancelledRow: 'Ended before the slot did.',
 };
+
+// Fee parts of fees_eur, as sent per row by the API (backend/fees.py FEE_PARTS)
+const FEE_PARTS = [
+  ['fees_network_eur', 'Network'],
+  ['fees_state_eur', 'State fees'],
+  ['fees_margin_eur', 'Seller margin'],
+  ['fees_vat_eur', 'VAT on fees'],
+  ['fees_export_eur', 'Export fees'],
+];
 
 // Label with an ⓘ button: explanation on hover, keyboard focus or tap
 function Hint({ label, hint, align = 'left' }) {
@@ -461,6 +473,9 @@ function App() {
       up:  { energy: 0, grid_energy: 0, profit: 0, duration: 0, count: 0, backup: 0, cancelled: 0, grid: 0, kratt: 0, ffr: 0, net: 0, priceSum: 0, priceCount: 0, billSpot: 0, fees: 0, requested: 0, netOff: 0, netOn: 0, netEnergy: 0, spotSum: 0, spotEnergy: 0 },
       down:{ energy: 0, grid_energy: 0, profit: 0, duration: 0, count: 0, backup: 0, cancelled: 0, grid: 0, kratt: 0, ffr: 0, net: 0, priceSum: 0, priceCount: 0, billSpot: 0, fees: 0, requested: 0, netOff: 0, netOn: 0, netEnergy: 0, spotSum: 0, spotEnergy: 0 },
       total:{ energy: 0, grid_energy: 0, profit: 0, duration: 0, count: 0, backup: 0, cancelled: 0, grid: 0, kratt: 0, ffr: 0, net: 0, priceSum: 0, priceCount: 0, billSpot: 0, fees: 0, requested: 0, netOff: 0, netOn: 0, netEnergy: 0, spotSum: 0, spotEnergy: 0 },
+      // What each kind of fee adds (−) or saves (+), and the network packages the period used
+      feeParts: Object.fromEntries(FEE_PARTS.map(([key]) => [key, 0])),
+      packages: new Set(),
     };
 
     for (const entry of data) {
@@ -499,6 +514,8 @@ function App() {
       acc.total.netOn += entry.net_total_fees || 0;    // with network & seller fees
       acc.total.billSpot += billSpot;
       acc.total.fees += feesEur;
+      for (const [key] of FEE_PARTS) acc.feeParts[key] += entry[key] || 0;
+      if (entry.network_package && typeof entry.fees_eur === 'number') acc.packages.add(entry.network_package);
       acc.total.requested += requested;
       acc.total.kratt += krattFee;
       acc.total.ffr += ffrIncome;
@@ -764,7 +781,9 @@ function App() {
 
         <div className="kpis">
           <div className="card kpi">
-            <div className="muted small">Net result {feesOn ? '· incl. network & seller fees' : '· spot + VAT'}</div>
+            <div className="muted small">
+              <Hint label={`Net result · what you earned ${feesOn ? '· incl. network & seller fees' : '· spot + VAT'}`} hint={HINTS.netKpi} />
+            </div>
             <div className={`kpi-value num ${signClass(summary.total.net)}`}>{fmtEur(summary.total.net)}</div>
             <div className="small kpi-compare">
               {feesOn ? 'Without fees' : 'With fees'}{' '}
@@ -777,7 +796,9 @@ function App() {
             </div>
           </div>
           <div className="card kpi">
-            <div className="muted small">{hasReport ? 'Activation share · ours vs Kratt' : 'Activation share'}</div>
+            <div className="muted small">
+              <Hint label={hasReport ? 'Activation share · ours vs Kratt' : 'Activation share'} hint={HINTS.shareKpi} />
+            </div>
             <div className="kpi-row">
               <span className="kpi-value num">{fmtNum(summary.total.profit)} €</span>
               {hasReport && <span className="kpi-sub num muted">/ {fmtNum(officialTotal.share)} €</span>}
@@ -789,6 +810,24 @@ function App() {
                   {officialTotal.share ? ` (${(((summary.total.profit - officialTotal.share) / officialTotal.share) * 100).toFixed(1)}%)` : ''} vs imported Qilowatt report
                 </>
               ) : 'Import a Qilowatt report to compare'}
+            </div>
+          </div>
+          <div className="card kpi">
+            <div className="muted small">
+              <Hint label={`Fees${summary.packages.size ? ` · ${[...summary.packages].map((p) => p.replace('Elektrilevi ', '')).join(', ')}` : ''}`} hint={HINTS.feesKpi} />
+            </div>
+            <div className="kpi-row">
+              <span className={`kpi-value num ${signClass(summary.total.fees)}`}>{fmtEur(summary.total.fees)}</span>
+              <span className="kpi-sub muted">{summary.total.fees < 0 ? 'paid' : summary.total.fees > 0 ? 'saved' : ''}</span>
+            </div>
+            <div className="muted small">
+              {FEE_PARTS.filter(([key]) => Math.abs(summary.feeParts[key]) >= 0.005).map(([key, label], i) => (
+                <span key={key}>{i > 0 && ' · '}{label} <span className="num">{fmtEur(summary.feeParts[key])}</span></span>
+              ))}
+            </div>
+            <div className="muted small">
+              Activation after fees <span className={`num text ${signClass(summary.total.profit + summary.total.fees)}`}>{fmtEur(summary.total.profit + summary.total.fees)}</span>
+              {!feesOn && ' · not in Net result (Fees off)'}
             </div>
           </div>
           <div className="card kpi">

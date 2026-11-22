@@ -151,16 +151,8 @@ def export_price(spot: float, fees: dict, with_fees: bool) -> float:
     return spot - (fees["export_margin"] + fees["export_tasakaal"]) / 100.0
 
 
-def bill_effect(row: dict, with_fees: bool, fees: dict) -> float | None:
-    """Electricity bill effect (€) of an activation row: metered import/export vs. what the
-    baseline would have imported/exported over the same time. None if prices are missing."""
-    spot = row.get("nordpool_price")
-    if spot is None:
-        return None
-    slot = datetime.fromisoformat(row.get("price_timeslot") or row["timeslot"])
-    p_import = import_price(spot, slot, fees, with_fees)
-    p_export = export_price(spot, fees, with_fees)
-
+def _energy_deltas(row: dict) -> tuple[float, float]:
+    """(extra import, extra export) in kWh of an activation row against its baseline."""
     grid_kwh = row.get("grid_kwh") or 0.0
     grid_import = row.get("grid_import_kwh")
     grid_export = row.get("grid_export_kwh")
@@ -170,12 +162,49 @@ def bill_effect(row: dict, with_fees: bool, fees: dict) -> float | None:
     baseline_import = row.get("baseline_import_kwh")
     baseline_export = row.get("baseline_export_kwh")
     if baseline_import is not None and baseline_export is not None:
-        return ((grid_export - baseline_export) * p_export
-                - (grid_import - baseline_import) * p_import)
+        return grid_import - baseline_import, grid_export - baseline_export
     # Legacy rows recorded before baseline energy was tracked: all import (DOWN) / export (UP)
     if row.get("signal") == "DOWN":
-        return -p_import * grid_import
-    return p_export * grid_export
+        return grid_import, 0.0
+    return 0.0, grid_export
+
+
+def bill_effect(row: dict, with_fees: bool, fees: dict) -> float | None:
+    """Electricity bill effect (€) of an activation row: metered import/export vs. what the
+    baseline would have imported/exported over the same time. None if prices are missing."""
+    spot = row.get("nordpool_price")
+    if spot is None:
+        return None
+    slot = datetime.fromisoformat(row.get("price_timeslot") or row["timeslot"])
+    d_import, d_export = _energy_deltas(row)
+    return (d_export * export_price(spot, fees, with_fees)
+            - d_import * import_price(spot, slot, fees, with_fees))
+
+
+# Fee parts shown separately: (row column, fee keys). Network is the package's rate for the slot.
+FEE_PARTS = {
+    "fees_network_eur": None,
+    "fees_state_eur": ("taastuv", "aktsiis", "tasakaal", "varustus"),
+    "fees_margin_eur": ("margin",),
+    "fees_vat_eur": None,                       # VAT on all of the above
+    "fees_export_eur": ("export_margin", "export_tasakaal"),
+}
+
+
+def fee_breakdown(row: dict, fees: dict) -> dict:
+    """What each kind of fee adds (−) or saves (+) for an activation row, in €. Sums to the
+    difference between the bill effect with and without fees."""
+    slot = datetime.fromisoformat(row.get("price_timeslot") or row["timeslot"])
+    d_import, d_export = _energy_deltas(row)
+    cents = {
+        "fees_network_eur": fees[NETWORK_RATE_KEY[network_period(slot, fees)]],
+        "fees_state_eur": sum(fees[k] for k in FEE_PARTS["fees_state_eur"]),
+        "fees_margin_eur": fees["margin"],
+    }
+    parts = {col: -d_import * c / 100.0 for col, c in cents.items()}
+    parts["fees_vat_eur"] = -d_import * sum(cents.values()) / 100.0 * fees["vat"] / 100.0
+    parts["fees_export_eur"] = -d_export * sum(fees[k] for k in FEE_PARTS["fees_export_eur"]) / 100.0
+    return {col: round(v, 5) for col, v in parts.items()}
 
 
 def add_fee_columns(row: dict, fees: dict) -> dict:
@@ -183,10 +212,14 @@ def add_fee_columns(row: dict, fees: dict) -> dict:
     fee settings so edits apply instantly (the stored grid_cost / net_total are spot + VAT only)."""
     slot = row.get("price_timeslot") or row.get("timeslot")
     row["tariff_period"] = network_period(datetime.fromisoformat(slot), fees) if slot else None
+    package = fees.get("network_package")
+    row["network_package"] = PACKAGES[package]["label"] if package in PACKAGES else package
     bill = bill_effect(row, with_fees=True, fees=fees) if row.get("profit") is not None else None
     if bill is None:
-        row["grid_cost_fees"] = row["net_total_fees"] = row["price_per_kwh_fees"] = row["fees_eur"] = None
+        for col in ("grid_cost_fees", "net_total_fees", "price_per_kwh_fees", "fees_eur", *FEE_PARTS):
+            row[col] = None
         return row
+    row.update(fee_breakdown(row, fees))
     # What seller and network fees add (−) or save (+) on top of the spot + VAT bill effect
     row["fees_eur"] = round(bill + (row.get("grid_cost") or 0.0), 5)
     net = row["profit"] + bill

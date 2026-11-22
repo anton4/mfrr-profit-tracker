@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.7.4
+
+- The activation share is Kratt's payout, so the Fees toggle doesn't change it: network and seller fees apply to your electricity bill, on the extra import or export the activation caused, and they are already in Net result (Activation + Energy € + Fees). Taking them off the activation share as well would count them twice and break the comparison with the Qilowatt report.
+- The Net result card is now headed "Net result · what you earned". It and the Activation share card each have an ⓘ that explains the difference.
+- New Fees card next to Activation share, named after your network package (e.g. "Fees · Võrk 5"). It shows what your electricity fees came to for the period on the energy activations moved, − paid or + saved, split into network (the package's day, night or peak rate for each slot), state fees (renewable energy, excise, balancing capacity, security of supply), seller margin, VAT on those, and export fees. It also shows "Activation after fees": Kratt's payout with your fees applied.
+
 ## 1.7.3
 
 - The command direction is Kratt's grid target (the power limit, imported in `frrdown` and exported in `frrup`) against the baseline, not `qw_mode` alone. On 2026-11-21 from 12:30 to 19:30 Kratt activated UP in `frrdown` mode: the battery was charging from the grid at about 18.8 kW and Kratt cut the import to about 10.8 kW. The energy and the money were already right (UP, €6.37, as in Qilowatt), but the requested energy went to 57 empty DOWN rows and the day's Delivery showed 15%. The live view and the graph also showed DOWN for these runs.
