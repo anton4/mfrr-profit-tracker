@@ -6,7 +6,7 @@ The add-on talks to Home Assistant through the Supervisor, so you don't need a l
 
 ## Kratt right now
 
-The top of the page shows the current Kratt command: UP or DOWN, mFRR or aFRR, since when, the power Kratt requested, the power delivered (grid power against the baseline) and the grid power. The graph next to it shows the page's period:
+The top of the page shows the current Kratt command: UP or DOWN, mFRR or aFRR, since when, the power Kratt asked to regulate (its grid target against the baseline), the power delivered (grid power against the baseline) and the grid power. The graph next to it shows the page's period:
 
 - **Grid power** (blue): the summed phases, + import / − export.
 - **Kratt target** (orange, dashed): the baseline plus the requested power in the commanded direction. The closer the grid follows it, the closer the delivery is to 100 %.
@@ -52,7 +52,7 @@ All settings are add-on options; there is no second place. Edit them in either o
 |---|---|
 | `sensor_source` | Qilowatt source sensor. A command is active while its state is `Kratt`. |
 | `sensor_mode` | Qilowatt mode sensor: `frrdown` = DOWN, `frrup` = UP. |
-| `sensor_powerlimit` | Optional. Qilowatt power limit sensor (W or kW), for requested energy and delivery %. |
+| `sensor_powerlimit` | Optional. Qilowatt power limit sensor (W or kW): Kratt's grid target, for the command direction, requested energy and delivery %. |
 | `sensor_grid_power` | Grid power sensors, one per phase (W or kW, + import / − export), e.g. Shelly 3EM `channel_a/b/c_power`. They should update every few seconds. |
 | `sensor_nordpool` | Nord Pool price sensor (€/kWh, no VAT or tariffs). |
 | `kratt_share` | Share of activation revenue kept by Kratt (0.2 = 20 %). |

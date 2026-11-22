@@ -15,7 +15,7 @@ const HINTS = {
   count: 'Number of activations: one per 15-minute slot, market and direction. Ramp minutes (↗) are not counted.',
   duration: 'Total time Kratt commanded this direction.',
   energy: 'Regulated energy, measured at the grid connection against the baseline (the grid power just before the signal). DOWN = extra import or less export, UP = extra export or less import. This is the energy Kratt settles.',
-  requested: 'Energy Kratt asked for: the requested power (qw_powerlimit) × the time it was requested.',
+  requested: 'Energy Kratt asked to regulate: how far its grid target (qw_powerlimit) is from the baseline × the time it was requested.',
   delivery: 'Regulated energy ÷ requested energy. 100% means the battery followed the command fully; above 100% is overshoot.',
   activation: 'Your share of Kratt\'s activation revenue after Kratt\'s fee (20% by default). UP: (market price − NPS) × energy; DOWN: (NPS − market price) × energy.',
   net: 'Activation revenue plus the change in your electricity bill compared with staying at the baseline. With Fees on, network and seller fees are included; otherwise import is spot + VAT and export is spot.',

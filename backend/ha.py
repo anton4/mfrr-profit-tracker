@@ -10,7 +10,8 @@ HA_URL = os.getenv("HA_URL", "http://localhost:8123")
 HA_TOKEN = os.getenv("HA_TOKEN")
 
 # Entities: sensors.current() — source (== "Kratt" during an mFRR command), mode (frrdown → DOWN,
-# frrup → UP), optional power limit (requested power), grid power per phase (W, +import /
+# frrup → UP), optional power limit (Kratt's grid target, unsigned: import in frrdown, export in
+# frrup), grid power per phase (W, +import /
 # -export, e.g. Shelly 3EM channel a/b/c power) and the Nord Pool price (€/kWh)
 
 PROVIDER = "kratt"
@@ -108,13 +109,17 @@ def _get_scaled(entity_id: str, units: dict, default_unit: str, fetch=None) -> f
         return None
 
 
-def get_requested_w(fetch=None) -> float | None:
-    """Power Kratt requested for the current command (W, unsigned)."""
+def get_target_w(mode_signal: str | None, fetch=None) -> float | None:
+    """Grid power Kratt wants (W, +import / −export): the power limit, which the inverter holds
+    on the grid side, imported in frrdown and exported in frrup. Qilowatt's signals report shows
+    it signed the same way as "Requested power"."""
     entity_id = sensors.current()["powerlimit"]
-    if not entity_id:
+    if not entity_id or mode_signal not in ("UP", "DOWN"):
         return None
     value = _get_scaled(entity_id, _POWER_UNITS, "W", fetch)
-    return abs(value) if value is not None else None
+    if value is None:
+        return None
+    return abs(value) if mode_signal == "DOWN" else -abs(value)
 
 
 def get_grid_power_w(fetch=None) -> float | None:
@@ -216,6 +221,33 @@ def get_signal(fetch=None) -> str | None:
     if mode in UP_MODES:
         return "UP"
     return None
+
+
+# A target closer to the baseline than this is a hold at the baseline: keep the mode's direction
+HOLD_TOLERANCE_W = 200
+
+
+def commanded_direction(mode_signal: str | None, target_w: float | None,
+                        baseline_w: float | None) -> str | None:
+    """Direction Kratt is regulating: the grid target below the baseline is UP (less import or
+    more export), above it DOWN — whatever the mode says. On 2026-11-21 from 12:30 Kratt
+    activated UP in frrdown mode: the battery was charging from the grid at about 18.8 kW and
+    Kratt cut the import to about 10.8 kW. Without a target, or with the target at the
+    baseline, the mode decides."""
+    if not mode_signal or target_w is None or baseline_w is None:
+        return mode_signal
+    if target_w < baseline_w - HOLD_TOLERANCE_W:
+        return "UP"
+    if target_w > baseline_w + HOLD_TOLERANCE_W:
+        return "DOWN"
+    return mode_signal
+
+
+def regulation_w(target_w: float | None, baseline_w: float | None) -> float | None:
+    """Power Kratt asked to regulate: how far the target is from the baseline (W, unsigned)."""
+    if target_w is None or baseline_w is None:
+        return None
+    return abs(target_w - baseline_w)
 
 
 def deviation_direction(deviation_kwh: float) -> str | None:

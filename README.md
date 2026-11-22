@@ -73,7 +73,7 @@ KRATT_SHARE=0.20
 
 -   SENSOR_MODE: Qilowatt mode sensor that gives the direction. **`frrdown`** = DOWN, **`frrup`** = UP.
 
--   SENSOR_POWERLIMIT (optional): Qilowatt power limit sensor, the power Kratt requested (W or kW). Used to record requested energy and delivery % per slot.
+-   SENSOR_POWERLIMIT (optional): Qilowatt power limit sensor (W or kW). It is Kratt's grid target, unsigned: import in `frrdown`, export in `frrup`. Used for the command direction, requested energy and delivery % per slot.
 
 -   SENSOR_GRID_POWER: Grid **power** sensors, one per phase, comma-separated (W or kW, read from `unit_of_measurement`). Positive = importing, negative = exporting, e.g. Shelly 3EM `channel_a/b/c_power`. They should update every few seconds. Kratt measures at the grid connection point, so these sensors are used for the baseline, the delivered mFRR energy and the grid import/export. Cumulative energy counters aren't used, because they typically update only about once a minute.
 
@@ -113,7 +113,7 @@ DOWN: mFRR energy = max(0, net_grid_kWh − baseline_kWh)   # extra import / les
 UP:   mFRR energy = max(0, baseline_kWh − net_grid_kWh)   # extra export / less import
 ```
 
--   Requested energy is `qw_powerlimit` integrated over the same metered time (`requested_kwh`). **Delivery %** = delivered mFRR energy / requested energy, a rough measure of how well the battery followed the command.
+-   Requested energy is the regulation Kratt asked for, |grid target − baseline|, integrated over the same metered time (`requested_kwh`). The grid target is `qw_powerlimit`, imported in `frrdown` and exported in `frrup`. **Delivery %** = delivered mFRR energy / requested energy, a rough measure of how well the battery followed the command.
 
 -   Grid import and export are stored separately per slot (`grid_import_kwh`, `grid_export_kwh`), along with what the baseline would have imported and exported over the same time (`baseline_import_kwh`, `baseline_export_kwh`).
 
@@ -205,7 +205,7 @@ This rule classified all runs in a Qilowatt signals report correctly. An importe
 
 How the tracker counts and prices energy, like Kratt's settlement:
 
--   **Direction split.** Energy is split by the sign of (grid − baseline) on every tick of a run, including an aFRR restore phase. Above the baseline counts as DOWN, below as UP. Requested energy follows `qw_mode`.
+-   **Direction split.** Energy is split by the sign of (grid − baseline) on every tick of a run, including an aFRR restore phase. Above the baseline counts as DOWN, below as UP. Requested energy and activity follow the commanded direction: the grid target below the baseline is UP, above it DOWN, and `qw_mode` only when there's no power limit sensor or the target is within 200 W of the baseline. Kratt can activate UP in `frrdown` mode: on 2026-11-21 the battery was charging from the grid at about 18.8 kW and Kratt cut the import to about 10.8 kW.
 
 -   **mFRR ramp minute.** The minute before the quarter is booked in its own slot (a row ending in `_r`, marked ↗ in the UI). It's priced with the **next** quarter's mFRR and Nord Pool prices, because Kratt treats it as part of that activation.
 

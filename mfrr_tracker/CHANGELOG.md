@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.7.3
+
+- The command direction is Kratt's grid target (the power limit, imported in `frrdown` and exported in `frrup`) against the baseline, not `qw_mode` alone. On 2026-11-21 from 12:30 to 19:30 Kratt activated UP in `frrdown` mode: the battery was charging from the grid at about 18.8 kW and Kratt cut the import to about 10.8 kW. The energy and the money were already right (UP, €6.37, as in Qilowatt), but the requested energy went to 57 empty DOWN rows and the day's Delivery showed 15%. The live view and the graph also showed DOWN for these runs.
+- Requested energy is the regulation Kratt asked for, |grid target − baseline|, not the power limit itself. The live view's Requested and Delivery % follow (on 22.11 a run showed "Requested 6.6 kW, delivered 8.6 kW, 130%": Kratt asked for 9.0 kW, 2.4 kW import down to 6.6 kW export, so 96%).
+- Past rows keep the old figures until you backfill them. Backfill 21.11 (or any day with such runs) from Data tools to fix them.
+
 ## 1.7.2
 
 - Backfill only offers the dates Home Assistant still has history for. The tracker reads the history of its sensors (Qilowatt source, mode and power limit, and the grid power phases) to find how far back the recorder keeps it, since Home Assistant doesn't publish `purge_keep_days`. The form says from when, the date pickers start there, and an older start is refused instead of failing with "no history".

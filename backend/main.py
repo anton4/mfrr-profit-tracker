@@ -7,8 +7,8 @@ import pytz
 from sqlite_utils import Database
 from sqlite_utils.db import NotFoundError
 
-from ha import (PROVIDER, GridMeter, classify_market, deviation_direction, get_entity, get_requested_w,
-                get_signal, get_source_changed)
+from ha import (PROVIDER, GridMeter, classify_market, commanded_direction, deviation_direction, get_entity,
+                get_signal, get_source_changed, get_target_w, regulation_w)
 from baseline import SignalBaseline
 from history import HistoryStates, current_units, fetch_history
 import ha_sensors
@@ -79,7 +79,7 @@ required_columns = {
     "metered_s": float,        # seconds covered by meter reads
     "baseline_import_kwh": float,  # what the baseline would have imported over the metered time
     "baseline_export_kwh": float,  # what the baseline would have exported over the metered time
-    "requested_kwh": float,    # energy Kratt asked for (qw_powerlimit × metered time)
+    "requested_kwh": float,    # energy Kratt asked to regulate (|grid target − baseline| × time)
     "delivery_pct": float,     # delivered mFRR energy / requested energy
     "active_s": float,         # seconds this direction was active in the slot
     "baseline_w": float,       # locked baseline of the (latest) run in this slot
@@ -131,7 +131,8 @@ class Tracker:
     Rows are per slot, market (MFRR/AFRR) and direction. Like Kratt, energy is split by the
     sign of (grid − baseline) on every tick of a run — including an aFRR restore phase where
     qw_mode may show the opposite direction — while requested energy and activity follow the
-    commanded direction.
+    commanded direction: Kratt's grid target against the baseline (commanded_direction), which
+    is not always qw_mode. Requested energy is the regulation asked for, |target − baseline|.
     """
 
     def __init__(self, store_baseline: bool = True, keep_points: bool = False, max_points: int | None = None):
@@ -164,9 +165,13 @@ class Tracker:
 
         # Read the meter every tick so the next interval only covers the last ~10 s
         reading = self.meter.read(now, slot_start=timeslot, fetch=fetch)
-        signal = get_signal(fetch)
+        mode_signal = get_signal(fetch)
         # Snapshot of the grid state just before the signal, locked for the run
-        baseline_w = self.baseline.on_tick(now, reading, active=signal is not None)
+        baseline_w = self.baseline.on_tick(now, reading, active=mode_signal is not None)
+        # The direction Kratt regulates comes from its grid target against the baseline: an UP
+        # activation can arrive in frrdown mode (charge from the grid, but less than before)
+        target_w = get_target_w(mode_signal, fetch)
+        signal = commanded_direction(mode_signal, target_w, baseline_w)
 
         if signal != self.last_logged_signal:
             if live:
@@ -188,8 +193,8 @@ class Tracker:
             self.run_market = self._resumed_market(self.run_start) or classify_market(self.run_start)
             if live:
                 print(f"🏷️  Kratt run from {self.run_start.isoformat()} classified as {self.run_market}")
-        requested_w = get_requested_w(fetch)
-        self._record(now, signal, baseline_w, requested_w)
+        requested_w = regulation_w(target_w, baseline_w)
+        self._record(now, signal, baseline_w, requested_w, target_w, mode_signal)
         if not write:
             return
         market = self.run_market
@@ -301,7 +306,8 @@ class Tracker:
     BOUNDARY_GRACE_S = 30
 
     def _record(self, now: datetime, signal: str | None, baseline_w: float | None = None,
-                requested_w: float | None = None):
+                requested_w: float | None = None, target_w: float | None = None,
+                mode_signal: str | None = None):
         """One live-view point: net grid power and the Kratt command at this tick."""
         if self.points is None:
             return
@@ -314,6 +320,8 @@ class Tracker:
                 "market": self.run_market if signal else None,
                 "baseline_w": baseline_w,
                 "requested_w": round(requested_w) if requested_w is not None else None,
+                "mode_signal": mode_signal,
+                "target_w": round(target_w) if target_w is not None else None,
             })
 
     def recent_points(self, since: datetime) -> list[dict]:
@@ -434,6 +442,9 @@ def seed_live_points():
             for p in recorded:
                 if p["signal"]:
                     p["baseline_w"] = baseline_w
+                    p["signal"] = commanded_direction(p.get("mode_signal") or p["signal"], p.get("target_w"), baseline_w)
+                    requested_w = regulation_w(p.get("target_w"), baseline_w)
+                    p["requested_w"] = round(requested_w) if requested_w is not None else None
         live_tracker.points.clear()
         live_tracker.points.extend(replayed + recorded)
 
